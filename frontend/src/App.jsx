@@ -36,6 +36,26 @@ function todayStr() {
   return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
 }
 
+// 最終来院からの経過日数を計算
+function daysSinceLastVisit(patient) {
+  const visits = patient.visits || [];
+  if (visits.length === 0) return null;
+  const latest = visits.reduce((max, v) => {
+    const t = new Date(v.created_at).getTime();
+    return t > max ? t : max;
+  }, 0);
+  if (!latest) return null;
+  return Math.floor((Date.now() - latest) / (1000 * 60 * 60 * 24));
+}
+
+// 離脱リスク患者を抽出（30日以上来院なし）
+function getDropoutRiskPatients(patients) {
+  return patients
+    .map((p) => ({ ...p, daysSince: daysSinceLastVisit(p) }))
+    .filter((p) => p.daysSince !== null && p.daysSince >= 30)
+    .sort((a, b) => b.daysSince - a.daysSince);
+}
+
 async function apiFetch(path, options = {}, token = null) {
   const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
   if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -191,7 +211,7 @@ function MainApp({ session }) {
   async function saveVisit(patientId, visit) {
     const data = await apiFetch("/api/visits", {
       method:"POST",
-      body: JSON.stringify({ patient_id: patientId, date: visit.date, transcript: visit.transcript, karte: visit.karte })
+      body: JSON.stringify({ patient_id: patientId, date: visit.date, transcript: visit.transcript, karte: visit.karte, vas: visit.vas })
     }, token);
     setPatients((prev) => prev.map((p) =>
       p.id === patientId
@@ -208,12 +228,12 @@ function MainApp({ session }) {
 
   return (
     <>
-      <Header onHome={() => setView("home")} onLogout={handleLogout} email={session.user.email} />
+      <Header onHome={() => setView("home")} onChat={() => setView("chat")} onLogout={handleLogout} email={session.user.email} />
       <div style={{ maxWidth:860, margin:"0 auto", padding:"0 20px 80px" }}>
         {dataLoading ? (
           <div style={{ textAlign:"center", padding:"60px 0", color:c.inkFaint }}>読み込み中…</div>
         ) : view === "home" ? (
-          <Home patients={patients} query={query} setQuery={setQuery}
+          <Home patients={patients} query={query} setQuery={setQuery} token={token}
             onSelect={(p) => { setActivePatientId(p.id); setView("patient"); }}
             onNew={openNewSession} addPatient={addPatient} />
         ) : view === "session" && activePatient ? (
@@ -221,7 +241,9 @@ function MainApp({ session }) {
             onCancel={() => setView("home")}
             onSaved={async (visit) => { await saveVisit(activePatient.id, visit); setView("patient"); }} />
         ) : view === "patient" && activePatient ? (
-          <PatientDetail patient={activePatient} onBack={() => setView("home")} onNew={() => openNewSession(activePatient)} />
+          <PatientDetail patient={activePatient} token={token} onBack={() => setView("home")} onNew={() => openNewSession(activePatient)} />
+        ) : view === "chat" ? (
+          <ChatView token={token} onBack={() => setView("home")} />
         ) : null}
       </div>
     </>
@@ -229,7 +251,7 @@ function MainApp({ session }) {
 }
 
 // ── ヘッダー ──────────────────────────────────────────────────
-function Header({ onHome, onLogout, email }) {
+function Header({ onHome, onChat, onLogout, email }) {
   return (
     <div style={{ borderBottom:`1px solid ${c.line}`, background:"rgba(245,242,236,.85)", backdropFilter:"blur(6px)", position:"sticky", top:0, zIndex:10 }}>
       <div style={{ maxWidth:860, margin:"0 auto", padding:"14px 20px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
@@ -240,8 +262,8 @@ function Header({ onHome, onLogout, email }) {
             <div style={{ fontSize:10, letterSpacing:2, color:c.inkFaint, marginTop:-2 }}>VOICE AI KARTE</div>
           </div>
         </button>
-        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-          <div style={{ fontSize:12, color:c.inkFaint, display:"none" }}>{email}</div>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <button onClick={onChat} className="hov" style={{ ...ghostBtn, fontSize:12, padding:"7px 12px" }}>💬 AI相談</button>
           <button onClick={onLogout} className="hov" style={{ ...ghostBtn, fontSize:12, padding:"7px 12px" }}>ログアウト</button>
         </div>
       </div>
@@ -250,11 +272,13 @@ function Header({ onHome, onLogout, email }) {
 }
 
 // ── ホーム ────────────────────────────────────────────────────
-function Home({ patients, query, setQuery, onSelect, onNew, addPatient }) {
+function Home({ patients, query, setQuery, onSelect, onNew, addPatient, token }) {
   const [showNew, setShowNew] = useState(false);
   const [name, setName] = useState("");
   const [kana, setKana] = useState("");
   const [creating, setCreating] = useState(false);
+
+  const dropoutPatients = getDropoutRiskPatients(patients);
 
   const filtered = patients.filter((p) =>
     !query || p.name.replace(/\s/g,"").includes(query.replace(/\s/g,"")) || (p.kana||"").includes(query)
@@ -277,6 +301,11 @@ function Home({ patients, query, setQuery, onSelect, onNew, addPatient }) {
         <div style={{ fontFamily:mincho, fontSize:28, lineHeight:1.4, color:c.ink }}>話すだけで、カルテになる。</div>
         <p style={{ color:c.inkSoft, fontSize:14, marginTop:8, lineHeight:1.7 }}>施術中の会話をそのまま記録。AIが7項目に整理して、確認・修正するだけ。</p>
       </div>
+
+      {dropoutPatients.length > 0 && (
+        <FollowUpSection patients={dropoutPatients} token={token} onSelect={onSelect} />
+      )}
+
       <div style={{ marginTop:28, display:"flex", gap:10 }}>
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="患者名・よみがなで検索"
           style={{ flex:1, padding:"12px 14px", border:`1px solid ${c.line}`, borderRadius:10, fontSize:14, background:c.surface, color:c.ink }} />
@@ -365,6 +394,7 @@ function Session({ patient, token, onCancel, onSaved }) {
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [karte, setKarte] = useState(null);
+  const [vas, setVas] = useState(null);
   const [error, setError] = useState("");
   const [speechOK, setSpeechOK] = useState(true);
   const recogRef = useRef(null);
@@ -418,6 +448,7 @@ function Session({ patient, token, onCancel, onSaved }) {
       const data = await apiFetch("/api/generate-karte", { method:"POST", body: JSON.stringify({ transcript: src, format: karteFormat }) }, token);
       const base = karteFormat === "soap" ? emptySoap() : emptyKarte();
       setKarte({ ...base, ...data.karte });
+      setVas(typeof data.vas === "number" ? data.vas : null);
     } catch(e) { setError(`カルテ生成に失敗しました: ${e.message}`); }
     finally { setGenerating(false); }
   }
@@ -425,7 +456,7 @@ function Session({ patient, token, onCancel, onSaved }) {
   async function handleSave() {
     setSaving(true);
     try {
-      await onSaved({ date: todayStr(), transcript: (transcript + " " + interim).trim(), karte });
+      await onSaved({ date: todayStr(), transcript: (transcript + " " + interim).trim(), karte, vas });
     } catch(e) { setError(`保存に失敗しました: ${e.message}`); setSaving(false); }
   }
 
@@ -513,6 +544,29 @@ function Session({ patient, token, onCancel, onSaved }) {
               </div>
             ))}
           </div>
+
+          {/* VAS痛みスコア */}
+          <div style={{ marginTop:12, background:c.surface, border:`1px solid ${c.line}`, borderRadius:12, padding:14 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+              <span style={{ fontWeight:700, fontSize:14, color:c.ink }}>痛みスコア（VAS）</span>
+              <span style={{ fontSize:11, color:c.inkFaint }}>0＝なし 〜 10＝最大</span>
+            </div>
+            <div style={{ display:"flex", alignItems:"center", gap:12, marginTop:10 }}>
+              <input type="range" min="0" max="10" step="1"
+                value={vas ?? 0}
+                onChange={(e) => setVas(Number(e.target.value))}
+                style={{ flex:1 }} />
+              <span style={{ fontSize:20, fontWeight:600, color:c.brand, minWidth:52, textAlign:"right" }}>
+                {vas ?? "—"}<span style={{ fontSize:12, color:c.inkFaint }}>/10</span>
+              </span>
+            </div>
+            {vas === null && (
+              <button onClick={() => setVas(5)} className="hov" style={{ ...ghostBtn, marginTop:8, fontSize:12, padding:"6px 12px" }}>
+                痛みスコアを記録する
+              </button>
+            )}
+          </div>
+
           {error && <div style={{ color:c.rec, fontSize:13, marginTop:12 }}>{error}</div>}
           <button onClick={handleSave} disabled={saving} className="hov"
             style={{ ...primaryBtn, width:"100%", marginTop:18, padding:15, fontSize:15, opacity:saving ? 0.7 : 1 }}>
@@ -529,15 +583,23 @@ function isSoapKarte(karte) {
   return karte && ("subjective" in karte || "objective" in karte || "assessment" in karte || "plan" in karte);
 }
 
-function PatientDetail({ patient, onBack, onNew }) {
+function PatientDetail({ patient, token, onBack, onNew }) {
   const visits = (patient.visits || []).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   const [openId, setOpenId] = useState(visits[0]?.id || null);
+  const [tab, setTab] = useState("summary");
   const insights = patient.insights;
+  const hasVas = visits.some((v) => typeof v.vas === "number");
+
+  const tabs = [
+    { key: "summary", label: "サマリー" },
+    { key: "history", label: `来院履歴 (${visits.length})` },
+    { key: "vas", label: "痛みの推移" },
+  ];
 
   return (
     <div style={{ paddingTop:28 }}>
       <BackRow onBack={onBack} label="ホームに戻る" />
-      <div style={{ marginTop:14, display:"flex", justifyContent:"space-between", alignItems:"flex-end" }}>
+      <div style={{ marginTop:14, display:"flex", justifyContent:"space-between", alignItems:"flex-end", flexWrap:"wrap", gap:12 }}>
         <div>
           <div style={{ fontFamily:mincho, fontSize:26, color:c.ink }}>{patient.name}</div>
           <div style={{ fontSize:12, color:c.inkFaint, marginTop:4 }}>{patient.kana || "—"} ・ 来院 {visits.length} 回</div>
@@ -545,48 +607,74 @@ function PatientDetail({ patient, onBack, onNew }) {
         <button onClick={onNew} className="hov" style={primaryBtn}>＋ 今日の施術を記録</button>
       </div>
 
-      {insights && <InsightsPanel insights={insights} />}
-
-      <div style={{ marginTop:28 }}>
-        <SectionLabel>来院履歴</SectionLabel>
-        {visits.length === 0 && <div style={{ color:c.inkFaint, fontSize:14, padding:"20px 0" }}>まだ記録がありません。</div>}
-        <div style={{ display:"grid", gap:10, marginTop:12 }}>
-          {visits.map((v) => {
-            const open = openId === v.id;
-            const karte = v.karte || {};
-            const sections = isSoapKarte(karte) ? SOAP_SECTIONS : SECTIONS;
-            const preview = karte.chief_complaint || karte.subjective || "記録内容あり";
-            return (
-              <div key={v.id} style={{ background:c.surface, border:`1px solid ${c.line}`, borderRadius:12, overflow:"hidden" }}>
-                <button onClick={() => setOpenId(open ? null : v.id)}
-                  style={{ width:"100%", textAlign:"left", background:"none", border:"none", cursor:"pointer", padding:16, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                  <div>
-                    <div style={{ fontSize:14, fontWeight:600, color:c.ink }}>{v.date}</div>
-                    <div style={{ fontSize:12, color:c.inkFaint, marginTop:3 }}>{preview}</div>
-                  </div>
-                  <span style={{ color:c.inkFaint, fontSize:18 }}>{open ? "−" : "+"}</span>
-                </button>
-                {open && (
-                  <div style={{ padding:"0 16px 16px", borderTop:`1px solid ${c.line}` }}>
-                    <div style={{ display:"grid", gap:8, marginTop:14 }}>
-                      {sections.map((s) => (
-                        <div key={s.key} style={{ display:"flex", gap:10 }}>
-                          <div style={{ minWidth:86, fontSize:12, color:c.inkSoft }}>
-                            <span style={{ fontFamily:mincho, color:c.brand, marginRight:4 }}>{s.num}</span>{s.label}
-                          </div>
-                          <div style={{ fontSize:13, color:c.ink, lineHeight:1.6, flex:1 }}>
-                            {karte[s.key] || <span style={{ color:c.inkFaint }}>—</span>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+      {/* タブ */}
+      <div style={{ display:"flex", gap:4, marginTop:20, borderBottom:`1px solid ${c.line}` }}>
+        {tabs.map((t) => (
+          <button key={t.key} onClick={() => setTab(t.key)}
+            style={{ padding:"10px 16px", background:"none", border:"none", borderBottom:`2px solid ${tab===t.key ? c.brand : "transparent"}`, cursor:"pointer", fontSize:14, fontWeight:tab===t.key ? 600 : 400, color:tab===t.key ? c.brand : c.inkFaint, marginBottom:-1 }}>
+            {t.label}
+          </button>
+        ))}
       </div>
+
+      {/* サマリータブ */}
+      {tab === "summary" && (
+        insights ? <InsightsPanel insights={insights} />
+        : <div style={{ color:c.inkFaint, fontSize:14, padding:"30px 0" }}>カルテを記録すると、AIサマリーが自動生成されます。</div>
+      )}
+
+      {/* 来院履歴タブ */}
+      {tab === "history" && (
+        <div style={{ marginTop:20 }}>
+          {visits.length === 0 && <div style={{ color:c.inkFaint, fontSize:14, padding:"20px 0" }}>まだ記録がありません。</div>}
+          <div style={{ display:"grid", gap:10 }}>
+            {visits.map((v) => {
+              const open = openId === v.id;
+              const karte = v.karte || {};
+              const sections = isSoapKarte(karte) ? SOAP_SECTIONS : SECTIONS;
+              const preview = karte.chief_complaint || karte.subjective || "記録内容あり";
+              return (
+                <div key={v.id} style={{ background:c.surface, border:`1px solid ${c.line}`, borderRadius:12, overflow:"hidden" }}>
+                  <button onClick={() => setOpenId(open ? null : v.id)}
+                    style={{ width:"100%", textAlign:"left", background:"none", border:"none", cursor:"pointer", padding:16, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <div>
+                      <div style={{ fontSize:14, fontWeight:600, color:c.ink }}>
+                        {v.date}
+                        {typeof v.vas === "number" && <span style={{ marginLeft:8, fontSize:11, fontWeight:600, padding:"2px 7px", borderRadius:5, background:c.brand+"1A", color:c.brand }}>痛み {v.vas}/10</span>}
+                      </div>
+                      <div style={{ fontSize:12, color:c.inkFaint, marginTop:3 }}>{preview}</div>
+                    </div>
+                    <span style={{ color:c.inkFaint, fontSize:18 }}>{open ? "−" : "+"}</span>
+                  </button>
+                  {open && (
+                    <div style={{ padding:"0 16px 16px", borderTop:`1px solid ${c.line}` }}>
+                      <div style={{ display:"grid", gap:8, marginTop:14 }}>
+                        {sections.map((s) => (
+                          <div key={s.key} style={{ display:"flex", gap:10 }}>
+                            <div style={{ minWidth:86, fontSize:12, color:c.inkSoft }}>
+                              <span style={{ fontFamily:mincho, color:c.brand, marginRight:4 }}>{s.num}</span>{s.label}
+                            </div>
+                            <div style={{ fontSize:13, color:c.ink, lineHeight:1.6, flex:1 }}>
+                              {karte[s.key] || <span style={{ color:c.inkFaint }}>—</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 痛みの推移タブ */}
+      {tab === "vas" && (
+        <div style={{ marginTop:20, background:c.surface, border:`1px solid ${c.line}`, borderRadius:14, padding:18 }}>
+          <VasChart visits={visits} />
+        </div>
+      )}
     </div>
   );
 }
@@ -676,3 +764,206 @@ function Toggle({ active, disabled, onClick, children }) {
 const inputS = { flex:1, minWidth:140, padding:"11px 13px", border:`1px solid #E4DFD4`, borderRadius:10, fontSize:14, background:"#F5F2EC", color:"#26231E" };
 const primaryBtn = { padding:"11px 18px", border:"none", borderRadius:10, background:"#0F5E54", color:"#fff", cursor:"pointer", fontSize:14, fontWeight:600 };
 const ghostBtn = { padding:"9px 14px", border:"1px solid #E4DFD4", borderRadius:10, background:"#FFFFFF", color:"#0F5E54", cursor:"pointer", fontSize:13, fontWeight:600, whiteSpace:"nowrap" };
+
+// ── 要フォロー患者セクション（離脱リスク + LINE下書き）──────
+function FollowUpSection({ patients, token, onSelect }) {
+  const [draftFor, setDraftFor] = useState(null);
+  const [draft, setDraft] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  async function makeDraft(patient) {
+    setDraftFor(patient.id); setDraft(""); setLoading(true); setCopied(false);
+    try {
+      const data = await apiFetch("/api/line-draft", { method:"POST", body: JSON.stringify({ patient_id: patient.id }) }, token);
+      setDraft(data.draft || "");
+    } catch(e) { setDraft(`生成に失敗しました: ${e.message}`); }
+    finally { setLoading(false); }
+  }
+
+  function copyDraft() {
+    navigator.clipboard.writeText(draft).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  function riskLevel(days) {
+    if (days >= 60) return { label: "離脱リスク高", color: "#A32D2D", bg: "#FCEBEB" };
+    if (days >= 45) return { label: "要注意", color: "#854F0B", bg: "#FAEEDA" };
+    return { label: "フォロー推奨", color: "#0F6E56", bg: "#E1F5EE" };
+  }
+
+  return (
+    <div className="rise" style={{ marginTop:24, background:c.surface, border:`1px solid ${c.line}`, borderRadius:14, padding:18 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14 }}>
+        <span style={{ fontSize:16 }}>🔔</span>
+        <SectionLabel>フォローすべき患者（{patients.length}名）</SectionLabel>
+      </div>
+      <div style={{ display:"grid", gap:10 }}>
+        {patients.map((p) => {
+          const risk = riskLevel(p.daysSince);
+          return (
+            <div key={p.id} style={{ border:`1px solid ${c.line}`, borderRadius:10, padding:12 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                  <button onClick={() => onSelect(p)} style={{ background:"none", border:"none", cursor:"pointer", padding:0, fontSize:15, fontWeight:600, color:c.ink }}>{p.name}</button>
+                  <span style={{ fontSize:11, fontWeight:600, padding:"3px 8px", borderRadius:6, background:risk.bg, color:risk.color }}>{risk.label}</span>
+                  <span style={{ fontSize:12, color:c.inkFaint }}>最終来院から {p.daysSince} 日</span>
+                </div>
+                <button onClick={() => makeDraft(p)} className="hov" style={{ ...ghostBtn, fontSize:12, padding:"7px 12px" }}>
+                  ✉️ LINE文章を作成
+                </button>
+              </div>
+              {draftFor === p.id && (
+                <div style={{ marginTop:12 }}>
+                  {loading ? (
+                    <div style={{ fontSize:13, color:c.inkFaint }}>AIが文章を作成中…</div>
+                  ) : (
+                    <>
+                      <div style={{ background:c.paper, borderRadius:8, padding:12, fontSize:13, lineHeight:1.7, color:c.ink, whiteSpace:"pre-wrap" }}>{draft}</div>
+                      <button onClick={copyDraft} className="hov" style={{ ...primaryBtn, marginTop:8, fontSize:13, padding:"8px 14px" }}>
+                        {copied ? "✓ コピーしました" : "📋 コピー"}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── VAS改善率グラフ ───────────────────────────────────────────
+function VasChart({ visits }) {
+  // 時系列（古い順）でvasがある来院のみ
+  const points = [...visits]
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    .filter((v) => typeof v.vas === "number")
+    .map((v) => ({ date: v.date, vas: v.vas }));
+
+  if (points.length === 0) {
+    return <div style={{ fontSize:13, color:c.inkFaint, padding:"16px 0" }}>痛みスコア（VAS）の記録がまだありません。カルテ生成時に会話から自動で記録されます。</div>;
+  }
+
+  const first = points[0].vas;
+  const last = points[points.length - 1].vas;
+  const improveRate = first > 0 ? Math.round(((first - last) / first) * 100) : 0;
+
+  const W = 300, H = 120, pad = 24;
+  const maxV = 10;
+  const stepX = points.length > 1 ? (W - pad * 2) / (points.length - 1) : 0;
+  const scaleY = (v) => H - pad - (v / maxV) * (H - pad * 2);
+  const path = points.map((p, i) => `${i === 0 ? "M" : "L"} ${pad + i * stepX} ${scaleY(p.vas)}`).join(" ");
+
+  return (
+    <div>
+      <div style={{ display:"flex", gap:20, marginBottom:16, flexWrap:"wrap" }}>
+        <div>
+          <div style={{ fontSize:11, color:c.inkFaint }}>初回</div>
+          <div style={{ fontSize:22, fontWeight:600, color:c.ink }}>{first}<span style={{ fontSize:13, color:c.inkFaint }}>/10</span></div>
+        </div>
+        <div>
+          <div style={{ fontSize:11, color:c.inkFaint }}>最新</div>
+          <div style={{ fontSize:22, fontWeight:600, color:c.ink }}>{last}<span style={{ fontSize:13, color:c.inkFaint }}>/10</span></div>
+        </div>
+        <div>
+          <div style={{ fontSize:11, color:c.inkFaint }}>改善率</div>
+          <div style={{ fontSize:22, fontWeight:600, color:improveRate >= 0 ? c.brand : c.rec }}>{improveRate >= 0 ? "" : ""}{improveRate}%</div>
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", maxWidth:W, height:"auto" }}>
+        {[0, 5, 10].map((g) => (
+          <g key={g}>
+            <line x1={pad} y1={scaleY(g)} x2={W-pad} y2={scaleY(g)} stroke={c.line} strokeWidth="1" />
+            <text x={pad-6} y={scaleY(g)+3} fontSize="9" fill={c.inkFaint} textAnchor="end">{g}</text>
+          </g>
+        ))}
+        <path d={path} fill="none" stroke={c.brand} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        {points.map((p, i) => (
+          <circle key={i} cx={pad + i * stepX} cy={scaleY(p.vas)} r="4" fill={c.brand} />
+        ))}
+      </svg>
+      <div style={{ fontSize:11, color:c.inkFaint, marginTop:4 }}>※ 痛みスコアは会話からAIが自動抽出します（0＝痛みなし〜10＝最大）</div>
+    </div>
+  );
+}
+
+// ── AI相談チャット ────────────────────────────────────────────
+function ChatView({ token, onBack }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const endRef = useRef(null);
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
+
+  async function send() {
+    const text = input.trim();
+    if (!text || loading) return;
+    const newMessages = [...messages, { role: "user", content: text }];
+    setMessages(newMessages);
+    setInput("");
+    setLoading(true);
+    try {
+      const data = await apiFetch("/api/chat", { method:"POST", body: JSON.stringify({ messages: newMessages }) }, token);
+      setMessages([...newMessages, { role: "assistant", content: data.reply }]);
+    } catch(e) {
+      setMessages([...newMessages, { role: "assistant", content: `エラー: ${e.message}` }]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const suggestions = ["五十肩の施術アプローチは？", "坐骨神経痛の原因と対処法", "頚椎の可動域評価の方法"];
+
+  return (
+    <div style={{ paddingTop:28 }}>
+      <BackRow onBack={onBack} label="ホームに戻る" />
+      <div style={{ marginTop:14, marginBottom:16 }}>
+        <div style={{ fontFamily:mincho, fontSize:24, color:c.ink }}>AI相談</div>
+        <div style={{ fontSize:13, color:c.inkSoft, marginTop:4 }}>症状・施術アプローチ・解剖学など、気になることをAIに相談できます。</div>
+      </div>
+
+      <div style={{ background:c.surface, border:`1px solid ${c.line}`, borderRadius:14, padding:16, minHeight:340, display:"flex", flexDirection:"column" }}>
+        <div style={{ flex:1, display:"flex", flexDirection:"column", gap:12, marginBottom:12 }}>
+          {messages.length === 0 && (
+            <div style={{ padding:"20px 0" }}>
+              <div style={{ fontSize:13, color:c.inkFaint, marginBottom:12 }}>例えばこんな質問ができます：</div>
+              <div style={{ display:"grid", gap:8 }}>
+                {suggestions.map((s) => (
+                  <button key={s} onClick={() => setInput(s)} className="hov"
+                    style={{ textAlign:"left", background:c.paper, border:`1px solid ${c.line}`, borderRadius:8, padding:"10px 12px", fontSize:13, color:c.ink, cursor:"pointer" }}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {messages.map((m, i) => (
+            <div key={i} style={{ display:"flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
+              <div style={{ maxWidth:"85%", padding:"10px 14px", borderRadius:12, fontSize:14, lineHeight:1.7, whiteSpace:"pre-wrap",
+                background: m.role === "user" ? c.brand : c.paper,
+                color: m.role === "user" ? "#fff" : c.ink }}>
+                {m.content}
+              </div>
+            </div>
+          ))}
+          {loading && <div style={{ fontSize:13, color:c.inkFaint }}>AIが考えています…</div>}
+          <div ref={endRef} />
+        </div>
+
+        <div style={{ display:"flex", gap:8, borderTop:`1px solid ${c.line}`, paddingTop:12 }}>
+          <textarea value={input} onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+            placeholder="質問を入力（Enterで送信）"
+            style={{ flex:1, minHeight:44, maxHeight:120, padding:"10px 12px", border:`1px solid ${c.line}`, borderRadius:10, fontSize:14, lineHeight:1.6, background:c.paper, color:c.ink, resize:"vertical" }} />
+          <button onClick={send} disabled={loading} className="hov" style={{ ...primaryBtn, padding:"0 18px", opacity:loading ? 0.7 : 1 }}>送信</button>
+        </div>
+      </div>
+    </div>
+  );
+}
