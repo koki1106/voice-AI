@@ -194,7 +194,9 @@ function MainApp({ session }) {
       body: JSON.stringify({ patient_id: patientId, date: visit.date, transcript: visit.transcript, karte: visit.karte })
     }, token);
     setPatients((prev) => prev.map((p) =>
-      p.id === patientId ? { ...p, visits: [data.visit, ...(p.visits || [])] } : p
+      p.id === patientId
+        ? { ...p, visits: [data.visit, ...(p.visits || [])], insights: data.insights || p.insights }
+        : p
     ));
   }
 
@@ -324,8 +326,17 @@ function Home({ patients, query, setQuery, onSelect, onNew, addPatient }) {
 }
 
 // ── 施術セッション ────────────────────────────────────────────
+const SOAP_SECTIONS = [
+  { key: "subjective", num: "S", label: "主観", hint: "痛む場所・つらい動き・日常生活での支障" },
+  { key: "objective",  num: "O", label: "客観", hint: "姿勢の歪み・触診・可動域・筋肉の硬さ" },
+  { key: "assessment", num: "A", label: "評価", hint: "症状の原因分析・評価" },
+  { key: "plan",       num: "P", label: "計画", hint: "本日の施術・次回目安・生活指導" },
+];
+const emptySoap = () => SOAP_SECTIONS.reduce((a, s) => ({ ...a, [s.key]: "" }), {});
+
 function Session({ patient, token, onCancel, onSaved }) {
   const [mode, setMode] = useState("voice");
+  const [karteFormat, setKarteFormat] = useState("standard"); // standard | soap
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [transcript, setTranscript] = useState("");
@@ -383,8 +394,9 @@ function Session({ patient, token, onCancel, onSaved }) {
     if (recording) stopRec();
     setError(""); setGenerating(true);
     try {
-      const data = await apiFetch("/api/generate-karte", { method:"POST", body: JSON.stringify({ transcript: src }) }, token);
-      setKarte({ ...emptyKarte(), ...data.karte });
+      const data = await apiFetch("/api/generate-karte", { method:"POST", body: JSON.stringify({ transcript: src, format: karteFormat }) }, token);
+      const base = karteFormat === "soap" ? emptySoap() : emptyKarte();
+      setKarte({ ...base, ...data.karte });
     } catch(e) { setError(`カルテ生成に失敗しました: ${e.message}`); }
     finally { setGenerating(false); }
   }
@@ -412,6 +424,12 @@ function Session({ patient, token, onCancel, onSaved }) {
           <div style={{ marginTop:20, display:"flex", gap:8 }}>
             <Toggle active={mode==="voice"} disabled={!speechOK} onClick={() => speechOK && setMode("voice")}>🎙 音声で記録</Toggle>
             <Toggle active={mode==="text"} onClick={() => setMode("text")}>⌨ テキストで記録</Toggle>
+          </div>
+
+          <div style={{ marginTop:10, display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:12, color:c.inkFaint }}>カルテ形式：</span>
+            <Toggle active={karteFormat==="standard"} onClick={() => setKarteFormat("standard")}>7項目</Toggle>
+            <Toggle active={karteFormat==="soap"} onClick={() => setKarteFormat("soap")}>SOAP</Toggle>
           </div>
           {!speechOK && <div style={{ fontSize:12, color:c.amber, marginTop:8 }}>※ テキスト入力をご利用ください。</div>}
 
@@ -458,12 +476,12 @@ function Session({ patient, token, onCancel, onSaved }) {
             <button onClick={() => { setKarte(null); setError(""); }} className="hov" style={ghostBtn}>↺ 入力に戻る</button>
           </div>
           <div style={{ display:"grid", gap:10, marginTop:14 }}>
-            {SECTIONS.map((s, i) => (
+            {(karteFormat === "soap" ? SOAP_SECTIONS : SECTIONS).map((s, i) => (
               <div key={s.key} className="rise" style={{ background:c.surface, border:`1px solid ${c.line}`, borderRadius:12, padding:14, animationDelay:`${i*70}ms` }}>
                 <div style={{ display:"flex", alignItems:"baseline", gap:8, marginBottom:6 }}>
                   <span style={{ fontFamily:mincho, fontSize:20, color:c.brand }}>{s.num}</span>
                   <span style={{ fontWeight:700, fontSize:14, color:c.ink }}>{s.label}</span>
-                  <span style={{ fontSize:11, color:c.inkFaint }}>／ {s.q}</span>
+                  {s.q && <span style={{ fontSize:11, color:c.inkFaint }}>／ {s.q}</span>}
                 </div>
                 <textarea value={karte[s.key]||""} onChange={(e) => setKarte({ ...karte, [s.key]: e.target.value })}
                   placeholder={s.hint}
@@ -483,9 +501,14 @@ function Session({ patient, token, onCancel, onSaved }) {
 }
 
 // ── 患者詳細 ──────────────────────────────────────────────────
+function isSoapKarte(karte) {
+  return karte && ("subjective" in karte || "objective" in karte || "assessment" in karte || "plan" in karte);
+}
+
 function PatientDetail({ patient, onBack, onNew }) {
   const visits = (patient.visits || []).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   const [openId, setOpenId] = useState(visits[0]?.id || null);
+  const insights = patient.insights;
 
   return (
     <div style={{ paddingTop:28 }}>
@@ -498,6 +521,8 @@ function PatientDetail({ patient, onBack, onNew }) {
         <button onClick={onNew} className="hov" style={primaryBtn}>＋ 今日の施術を記録</button>
       </div>
 
+      {insights && <InsightsPanel insights={insights} />}
+
       <div style={{ marginTop:28 }}>
         <SectionLabel>来院履歴</SectionLabel>
         {visits.length === 0 && <div style={{ color:c.inkFaint, fontSize:14, padding:"20px 0" }}>まだ記録がありません。</div>}
@@ -505,20 +530,22 @@ function PatientDetail({ patient, onBack, onNew }) {
           {visits.map((v) => {
             const open = openId === v.id;
             const karte = v.karte || {};
+            const sections = isSoapKarte(karte) ? SOAP_SECTIONS : SECTIONS;
+            const preview = karte.chief_complaint || karte.subjective || "記録内容あり";
             return (
               <div key={v.id} style={{ background:c.surface, border:`1px solid ${c.line}`, borderRadius:12, overflow:"hidden" }}>
                 <button onClick={() => setOpenId(open ? null : v.id)}
                   style={{ width:"100%", textAlign:"left", background:"none", border:"none", cursor:"pointer", padding:16, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                   <div>
                     <div style={{ fontSize:14, fontWeight:600, color:c.ink }}>{v.date}</div>
-                    <div style={{ fontSize:12, color:c.inkFaint, marginTop:3 }}>{karte.chief_complaint || "主訴の記録なし"}</div>
+                    <div style={{ fontSize:12, color:c.inkFaint, marginTop:3 }}>{preview}</div>
                   </div>
                   <span style={{ color:c.inkFaint, fontSize:18 }}>{open ? "−" : "+"}</span>
                 </button>
                 {open && (
                   <div style={{ padding:"0 16px 16px", borderTop:`1px solid ${c.line}` }}>
                     <div style={{ display:"grid", gap:8, marginTop:14 }}>
-                      {SECTIONS.map((s) => (
+                      {sections.map((s) => (
                         <div key={s.key} style={{ display:"flex", gap:10 }}>
                           <div style={{ minWidth:86, fontSize:12, color:c.inkSoft }}>
                             <span style={{ fontFamily:mincho, color:c.brand, marginRight:4 }}>{s.num}</span>{s.label}
@@ -536,6 +563,73 @@ function PatientDetail({ patient, onBack, onNew }) {
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── AIサマリー・今日聞くこと・次回プラン ────────────────────
+function InsightsPanel({ insights }) {
+  const s = insights.summary || {};
+  const tq = insights.today_questions || {};
+  const hasAlert = s.alert && s.alert.trim().length > 0;
+
+  const summaryRows = [
+    ["基本情報", s.basic_info],
+    ["主訴・経過", s.chief_complaint_history],
+    ["生活・特徴", s.lifestyle],
+    ["注意点・禁忌", s.precautions],
+    ["前回の施術ポイント・反応", s.last_treatment],
+    ["セルフケア", s.self_care],
+  ].filter(([, v]) => v && v.trim());
+
+  return (
+    <div style={{ marginTop:24, display:"grid", gap:12 }}>
+      {hasAlert && (
+        <div style={{ background:"#FCEBEB", border:"1px solid #F0999599", borderRadius:12, padding:14, display:"flex", gap:10, alignItems:"flex-start" }}>
+          <span style={{ fontSize:16 }}>⚠️</span>
+          <div style={{ fontSize:13, color:"#791F1F", lineHeight:1.6 }}>{s.alert}</div>
+        </div>
+      )}
+
+      <div style={{ background:c.surface, border:`1px solid ${c.line}`, borderRadius:12, padding:16 }}>
+        <SectionLabel>AIサマリー</SectionLabel>
+        <div style={{ display:"grid", gap:10, marginTop:12 }}>
+          {summaryRows.length === 0 && <div style={{ fontSize:13, color:c.inkFaint }}>情報が蓄積されると自動で表示されます。</div>}
+          {summaryRows.map(([label, val]) => (
+            <div key={label} style={{ display:"flex", gap:10 }}>
+              <div style={{ minWidth:150, fontSize:12, color:c.inkSoft, fontWeight:600 }}>{label}</div>
+              <div style={{ fontSize:13, color:c.ink, lineHeight:1.6, flex:1 }}>{val}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {(tq.symptom?.length > 0 || tq.conversation?.length > 0) && (
+        <div style={{ background:c.surface, border:`1px solid ${c.line}`, borderRadius:12, padding:16 }}>
+          <SectionLabel>今日聞くこと</SectionLabel>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginTop:12 }}>
+            <div>
+              <div style={{ fontSize:12, fontWeight:600, color:c.brand, marginBottom:6 }}>症状</div>
+              <ul style={{ margin:0, paddingLeft:18, fontSize:13, color:c.ink, lineHeight:1.8 }}>
+                {(tq.symptom || []).map((q, i) => <li key={i}>{q}</li>)}
+              </ul>
+            </div>
+            <div>
+              <div style={{ fontSize:12, fontWeight:600, color:c.brand, marginBottom:6 }}>会話</div>
+              <ul style={{ margin:0, paddingLeft:18, fontSize:13, color:c.ink, lineHeight:1.8 }}>
+                {(tq.conversation || []).map((q, i) => <li key={i}>{q}</li>)}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {insights.next_plan && (
+        <div style={{ background:c.surface, border:`1px solid ${c.line}`, borderRadius:12, padding:16 }}>
+          <SectionLabel>次回施術プラン（AI提案）</SectionLabel>
+          <div style={{ fontSize:13, color:c.ink, lineHeight:1.7, marginTop:10 }}>{insights.next_plan}</div>
+        </div>
+      )}
     </div>
   );
 }
