@@ -334,6 +334,27 @@ const SOAP_SECTIONS = [
 ];
 const emptySoap = () => SOAP_SECTIONS.reduce((a, s) => ({ ...a, [s.key]: "" }), {});
 
+// ── フォーマット別ガイド（録音前に見る「聞くこと」チェックリスト）──
+function FormatGuide({ format }) {
+  const items = format === "soap" ? SOAP_SECTIONS : SECTIONS;
+  return (
+    <div style={{ marginTop:12, background:c.brand+"0D", border:`1px solid ${c.brand}33`, borderRadius:12, padding:"12px 16px" }}>
+      <div style={{ fontSize:11, letterSpacing:1, color:c.brand, fontWeight:700, marginBottom:8 }}>
+        この形式で聞く・確認すること
+      </div>
+      <div style={{ display:"grid", gap:6 }}>
+        {items.map((s) => (
+          <div key={s.key} style={{ display:"flex", gap:8, alignItems:"baseline" }}>
+            <span style={{ fontFamily:mincho, fontSize:14, color:c.brand, minWidth:20 }}>{s.num}</span>
+            <span style={{ fontSize:12, fontWeight:600, color:c.ink, minWidth:64 }}>{s.label}</span>
+            <span style={{ fontSize:12, color:c.inkSoft }}>{s.q ? s.q + "／" : ""}{s.hint}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Session({ patient, token, onCancel, onSaved }) {
   const [mode, setMode] = useState("voice");
   const [karteFormat, setKarteFormat] = useState("standard"); // standard | soap
@@ -431,6 +452,9 @@ function Session({ patient, token, onCancel, onSaved }) {
             <Toggle active={karteFormat==="standard"} onClick={() => setKarteFormat("standard")}>7項目</Toggle>
             <Toggle active={karteFormat==="soap"} onClick={() => setKarteFormat("soap")}>SOAP</Toggle>
           </div>
+
+          <FormatGuide format={karteFormat} />
+
           {!speechOK && <div style={{ fontSize:12, color:c.amber, marginTop:8 }}>※ テキスト入力をご利用ください。</div>}
 
           {mode === "voice" && (
