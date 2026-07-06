@@ -83,17 +83,22 @@ app.post("/api/generate-karte", async (req, res) => {
 
   const is_soap = format === "soap";
 
+  const contraindicationNote = `
+
+また、以下の「危険信号（レッドフラッグ）」に該当する発言が会話にないか必ずチェックしてください：安静時痛・夜間痛、進行性の神経症状（麻痺・しびれの拡大）、排尿排便障害、原因不明の体重減少、発熱を伴う痛み、激しい頭痛、外傷後の強い痛み、がん既往、など施術より医療機関の受診を優先すべき兆候。`;
+
   const systemPrompt = is_soap
-    ? `あなたは整体院・カイロプラクティック院の優秀なカルテ作成アシスタントです。施術中の会話の文字起こしから、SOAP形式のカルテをJSON形式のみで生成してください。該当情報がない項目は空文字("")にしてください。JSON以外の文字は絶対に出力しないでください。
+    ? `あなたは整体院・カイロプラクティック院の優秀なカルテ作成アシスタントです。施術中の会話の文字起こしから、SOAP形式のカルテをJSON形式のみで生成してください。該当情報がない項目は空文字("")にしてください。JSON以外の文字は絶対に出力しないでください。${contraindicationNote}
 
 {
   "subjective": "S（主観）：痛む場所、つらい動き、日常生活での支障",
   "objective": "O（客観）：姿勢の歪み、触診、可動域、筋肉の硬さ",
   "assessment": "A（評価）：症状の原因分析・評価",
   "plan": "P（計画）：本日行った施術内容、次回の目安、生活指導",
-  "vas": 痛みのレベルを0〜10の整数で（会話から読み取れない場合はnull）
+  "vas": 痛みのレベルを0〜10の整数で（会話から読み取れない場合はnull）,
+  "contraindication": "危険信号に該当する症状があれば具体的に記載し医療機関受診の必要性を明記。なければ空文字"
 }`
-    : `あなたは整体院・カイロプラクティック院の優秀なカルテ作成アシスタントです。施術中の会話の文字起こしから、以下の項目のカルテをJSON形式のみで生成してください。会話に該当情報がない項目は空文字("")にしてください。JSON以外の文字は絶対に出力しないでください。
+    : `あなたは整体院・カイロプラクティック院の優秀なカルテ作成アシスタントです。施術中の会話の文字起こしから、以下の項目のカルテをJSON形式のみで生成してください。会話に該当情報がない項目は空文字("")にしてください。JSON以外の文字は絶対に出力しないでください。${contraindicationNote}
 
 {
   "patient": "患者名・来院回数",
@@ -103,16 +108,18 @@ app.post("/api/generate-karte", async (req, res) => {
   "response": "施術後の反応・変化",
   "lifestyle": "仕事・睡眠・運動・ストレスなど生活の話",
   "next_plan": "次回来院の提案・注意事項",
-  "vas": 痛みのレベルを0〜10の整数で（会話から「8/10」「10段階で7」等が読み取れる場合。読み取れない場合はnull）
+  "vas": 痛みのレベルを0〜10の整数で（会話から「8/10」「10段階で7」等が読み取れる場合。読み取れない場合はnull）,
+  "contraindication": "危険信号に該当する症状があれば具体的に記載し医療機関受診の必要性を明記。なければ空文字"
 }`;
 
   try {
-    const parsed = await callClaude(systemPrompt, `次の会話からカルテを生成してください:\n\n${transcript.trim()}`, 1000);
-    // vasをkarteから分離して返す（数値 or null）
+    const parsed = await callClaude(systemPrompt, `次の会話からカルテを生成してください:\n\n${transcript.trim()}`, 1200);
     let vas = null;
     if (typeof parsed.vas === "number" && parsed.vas >= 0 && parsed.vas <= 10) vas = Math.round(parsed.vas);
+    const contraindication = typeof parsed.contraindication === "string" ? parsed.contraindication.trim() : "";
     delete parsed.vas;
-    res.json({ karte: parsed, vas, format: is_soap ? "soap" : "standard" });
+    delete parsed.contraindication;
+    res.json({ karte: parsed, vas, contraindication, format: is_soap ? "soap" : "standard" });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
@@ -202,6 +209,7 @@ app.post("/api/visits", async (req, res) => {
 
   // カルテ保存には成功したので、まず応答を返す準備をしつつ、インサイト生成を試みる
   let insights = null;
+  let thanks = "";
   try {
     const { data: patient } = await supabase
       .from("patients")
@@ -219,13 +227,50 @@ app.post("/api/visits", async (req, res) => {
         .from("patients")
         .update({ insights })
         .eq("id", patient_id);
+
+      // 施術後の患者向けお礼メッセージを生成
+      try {
+        const thanksSystem = `あなたは整体院の温かいスタッフです。本日施術を受けた患者に送る、短いお礼メッセージを作成してください。以下のJSON形式のみで出力してください。
+
+{
+  "message": "本日のお礼と、施術内容・伝えたセルフケアや次回来院の目安に軽く触れる、親しみやすいメッセージ（120文字程度）。患者の名前を使う。"
+}`;
+        const thanksResult = await callClaude(
+          thanksSystem,
+          `患者名: ${patient.name}\n本日のカルテ: ${JSON.stringify(karte)}`,
+          400
+        );
+        thanks = thanksResult.message || "";
+      } catch (e) {
+        console.error("thanks generation failed:", e.message);
+      }
     }
   } catch (e) {
     // インサイト生成に失敗してもカルテ保存自体は成功させる
     console.error("insight generation failed:", e.message);
   }
 
-  res.json({ visit, insights });
+  res.json({ visit, insights, thanks });
+});
+
+// ── 患者レベル更新 ────────────────────────────────────────────
+app.patch("/api/patients/:id", async (req, res) => {
+  const user = await getUser(req);
+  if (!user) return res.status(401).json({ error: "認証が必要です" });
+
+  const { level } = req.body;
+  if (![1, 2, 3].includes(level)) return res.status(400).json({ error: "levelは1〜3です" });
+
+  const { data, error } = await supabase
+    .from("patients")
+    .update({ level })
+    .eq("id", req.params.id)
+    .eq("user_id", user.id)
+    .select()
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ patient: data });
 });
 
 // ── 離脱リスク患者向けLINEメッセージ下書き生成 ────────────────
