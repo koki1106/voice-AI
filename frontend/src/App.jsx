@@ -4,12 +4,14 @@ import { supabase } from "./supabase";
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
 const c = {
-  paper: "#F5F2EC", surface: "#FFFFFF", ink: "#26231E", inkSoft: "#6B655B",
-  inkFaint: "#9A9488", line: "#E4DFD4", brand: "#0F5E54", brandDeep: "#0A413A",
-  rec: "#D8503D", amber: "#C98A2B",
+  paper: "#FFFFFF", surface: "#FFFFFF", ink: "#111111", inkSoft: "#666666",
+  inkFaint: "#999999", line: "#E8E8E8", lineSoft: "#ECECEC", brand: "#0F4B3E", brandDeep: "#0A3B31",
+  brandSoft: "#E8F3EE", accent: "#B8863B", accentDeep: "#A36B17", rec: "#D8503D", amber: "#B8863B",
 };
-const mincho = "'Hiragino Mincho ProN','Yu Mincho','YuMincho',serif";
-const gothic = "'Hiragino Kaku Gothic ProN','Yu Gothic','Meiryo',sans-serif";
+const mincho = "'Noto Serif JP','Hiragino Mincho ProN','Yu Mincho',serif";
+const gothic = "'Noto Sans JP','Hiragino Kaku Gothic ProN','Yu Gothic','Meiryo',sans-serif";
+const cardShadow = "0 2px 12px rgba(0,0,0,0.06)";
+const cardShadowLg = "0 6px 20px rgba(0,0,0,0.08)";
 
 const SECTIONS = [
   { key: "patient",         num: "①", q: "誰？",          label: "患者情報",   hint: "患者名・来院回数" },
@@ -83,12 +85,21 @@ async function apiFetch(path, options = {}, token = null) {
 export default function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showSplash, setShowSplash] = useState(false);
+  const prevSession = useRef(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session); setLoading(false);
+      setSession(session);
+      prevSession.current = session;
+      setLoading(false);
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => {
+      // 未ログイン→ログインに変わった瞬間だけスプラッシュを表示
+      if (s && !prevSession.current) setShowSplash(true);
+      prevSession.current = s;
+      setSession(s);
+    });
     return () => subscription.unsubscribe();
   }, []);
 
@@ -104,20 +115,103 @@ export default function App() {
         * { box-sizing: border-box; }
         textarea, input, button { font-family: inherit; }
         @keyframes rise { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:none} }
+        @keyframes fadeIn { from{opacity:0} to{opacity:1} }
         @keyframes pulse { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.12);opacity:.55} }
         @keyframes ring { 0%{box-shadow:0 0 0 0 rgba(216,80,61,.45)} 100%{box-shadow:0 0 0 22px rgba(216,80,61,0)} }
+        @keyframes wave { 0%,100%{transform:scaleY(.35)} 50%{transform:scaleY(1)} }
+        @keyframes splashLogoIn { 0%{opacity:0;transform:translateY(8px)} 100%{opacity:1;transform:none} }
+        @keyframes lineFlow { 0%{transform:translateX(-100%)} 100%{transform:translateX(100%)} }
+        @keyframes floatParticle { 0%{opacity:0;transform:translate(0,0)} 30%{opacity:.9} 100%{opacity:0} }
         .rise { animation: rise .5s cubic-bezier(.2,.7,.3,1) both; }
-        .hov:hover { filter: brightness(.96); }
+        .fade-in { animation: fadeIn .6s ease both; }
+        .hov { transition: transform .15s ease, filter .15s ease; }
+        .hov:hover { filter: brightness(.97); }
+        .hov:active { transform: scale(.96); }
         .card-hov { transition: transform .15s ease, box-shadow .15s ease; }
-        .card-hov:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(38,35,30,.08); }
+        .card-hov:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,.10); }
         textarea:focus, input:focus { outline: 2px solid ${c.brand}; outline-offset: 1px; }
       `}</style>
+
+      {showSplash && <SplashScreen onDone={() => setShowSplash(false)} />}
 
       {!session ? (
         <AuthScreen />
       ) : (
-        <MainApp session={session} />
+        <div className="fade-in"><MainApp session={session} /></div>
       )}
+    </div>
+  );
+}
+
+// ── スプラッシュアニメーション（ログイン後のブランド演出）──────
+function SplashScreen({ onDone }) {
+  const [phase, setPhase] = useState(0);
+  useEffect(() => {
+    const timers = [
+      setTimeout(() => setPhase(1), 500),   // 波形
+      setTimeout(() => setPhase(2), 1200),  // 解析
+      setTimeout(() => setPhase(3), 1900),  // 完了ライン
+      setTimeout(() => onDone(), 2800),     // フェードアウト
+    ];
+    return () => timers.forEach(clearTimeout);
+  }, [onDone]);
+
+  const particles = Array.from({ length: 18 });
+
+  return (
+    <div style={{
+      position:"fixed", inset:0, zIndex:100, display:"flex", flexDirection:"column",
+      alignItems:"center", justifyContent:"center",
+      background:"radial-gradient(circle at 50% 40%, #0F4B3E 0%, #072019 100%)",
+      animation: phase >= 3 ? "fadeIn .5s ease reverse forwards" : "none",
+    }}>
+      {/* 光の粒子 */}
+      {phase >= 1 && particles.map((_, i) => {
+        const angle = (i / particles.length) * Math.PI * 2;
+        const dist = 60 + (i % 5) * 22;
+        return (
+          <span key={i} style={{
+            position:"absolute", width:4, height:4, borderRadius:"50%",
+            background: i % 2 ? "#C9E8DC" : "#FFFFFF",
+            left:"50%", top:"44%",
+            transform:`translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist}px)`,
+            animation:`floatParticle ${1.2 + (i%4)*0.3}s ease-in-out ${(i%6)*0.1}s infinite`,
+          }} />
+        );
+      })}
+
+      {/* ロゴ + 波形 */}
+      <div style={{ display:"flex", alignItems:"center", gap:16, animation:"splashLogoIn .6s ease both", zIndex:2 }}>
+        {phase >= 1 && <Waveform side="left" active={phase === 1} />}
+        <div style={{ textAlign:"center" }}>
+          <div style={{ width:64, height:64, borderRadius:16, background:"rgba(255,255,255,.12)", border:"1px solid rgba(255,255,255,.25)", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:32, margin:"0 auto 14px" }}>◔</div>
+          <div style={{ fontFamily:mincho, fontSize:28, color:"#fff", letterSpacing:2 }}>音声カルテ</div>
+          <div style={{ fontSize:11, letterSpacing:3, color:"rgba(255,255,255,.6)", marginTop:4 }}>VOICE AI KARTE</div>
+        </div>
+        {phase >= 1 && <Waveform side="right" active={phase === 1} />}
+      </div>
+
+      {/* 完了ライン */}
+      {phase >= 3 && (
+        <div style={{ position:"absolute", bottom:"32%", width:160, height:2, background:"rgba(255,255,255,.15)", overflow:"hidden", borderRadius:2 }}>
+          <div style={{ width:"50%", height:"100%", background:"#fff", animation:"lineFlow 1s ease-in-out infinite" }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Waveform({ side, active }) {
+  const bars = [0,1,2,3,4];
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:3, height:44, flexDirection: side === "left" ? "row" : "row-reverse" }}>
+      {bars.map((b) => (
+        <span key={b} style={{
+          width:3, height:36, borderRadius:2, background:"rgba(255,255,255,.5)",
+          transformOrigin:"center",
+          animation:`wave ${0.9 + b*0.12}s ease-in-out ${b*0.08}s infinite`,
+        }} />
+      ))}
     </div>
   );
 }
@@ -269,27 +363,33 @@ function MainApp({ session }) {
 // ── ヘッダー ──────────────────────────────────────────────────
 function Header({ onHome, onChat, onLogout, email }) {
   return (
-    <div style={{ borderBottom:`1px solid ${c.line}`, background:"rgba(245,242,236,.85)", backdropFilter:"blur(6px)", position:"sticky", top:0, zIndex:10 }}>
-      <div style={{ maxWidth:860, margin:"0 auto", padding:"14px 20px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-        <button onClick={onHome} style={{ background:"none", border:"none", cursor:"pointer", padding:0, display:"flex", alignItems:"center", gap:10 }}>
-          <div style={{ width:30, height:30, borderRadius:8, background:c.brand, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:15 }}>◔</div>
-          <div>
-            <div style={{ fontFamily:mincho, fontSize:18, letterSpacing:1, color:c.ink }}>音声カルテ</div>
-            <div style={{ fontSize:10, letterSpacing:2, color:c.inkFaint, marginTop:-2 }}>VOICE AI KARTE</div>
+    <div style={{ borderBottom:`1px solid ${c.line}`, background:"#fff", position:"sticky", top:0, zIndex:10 }}>
+      <div style={{ maxWidth:860, margin:"0 auto", height:72, padding:"0 20px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+        <button onClick={onHome} style={{ background:"none", border:"none", cursor:"pointer", padding:0, display:"flex", alignItems:"center", gap:12 }}>
+          <div style={{ width:44, height:44, borderRadius:12, background:c.brand, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:22 }}>◔</div>
+          <div style={{ textAlign:"left" }}>
+            <div style={{ fontFamily:mincho, fontSize:22, fontWeight:700, letterSpacing:1, color:c.ink }}>音声カルテ</div>
+            <div style={{ fontSize:11, letterSpacing:2, color:c.inkFaint, marginTop:-1 }}>VOICE AI KARTE</div>
           </div>
         </button>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <button onClick={onChat} className="hov" style={{ ...ghostBtn, fontSize:12, padding:"7px 12px" }}>💬 AI相談</button>
-          <button onClick={onLogout} className="hov" style={{ ...ghostBtn, fontSize:12, padding:"7px 12px" }}>ログアウト</button>
+          <button onClick={onChat} className="hov" style={headerBtn}>
+            <span style={{ fontSize:15 }}>◇</span> AI相談
+          </button>
+          <button onClick={onLogout} className="hov" style={headerBtn}>
+            <span style={{ fontSize:15 }}>⏻</span> ログアウト
+          </button>
         </div>
       </div>
     </div>
   );
 }
+const headerBtn = { height:44, padding:"0 14px", display:"flex", alignItems:"center", gap:6, background:"#fff", border:`1px solid ${c.line}`, borderRadius:14, color:c.brand, cursor:"pointer", fontSize:13, fontWeight:600 };
 
 // ── ホーム ────────────────────────────────────────────────────
 function Home({ patients, query, setQuery, onSelect, onNew, addPatient, token }) {
   const [showNew, setShowNew] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const [name, setName] = useState("");
   const [kana, setKana] = useState("");
   const [creating, setCreating] = useState(false);
@@ -311,24 +411,41 @@ function Home({ patients, query, setQuery, onSelect, onNew, addPatient, token })
     finally { setCreating(false); }
   }
 
+  // 直近患者（最終来院が新しい順）上位5名。検索中は絞り込み結果を全件表示
+  const sortedByRecent = [...patients].sort((a, b) => {
+    const da = daysSinceLastVisit(a); const db = daysSinceLastVisit(b);
+    if (da === null) return 1; if (db === null) return -1;
+    return da - db;
+  });
+  const displayed = query ? filtered : sortedByRecent.slice(0, 5);
+
   return (
-    <div style={{ paddingTop:36 }}>
+    <div style={{ paddingTop:32 }}>
+      {/* メインコピー */}
       <div className="rise">
-        <div style={{ fontFamily:mincho, fontSize:28, lineHeight:1.4, color:c.ink }}>話すだけで、カルテになる。</div>
-        <p style={{ color:c.inkSoft, fontSize:14, marginTop:8, lineHeight:1.7 }}>施術中の会話をそのまま記録。AIが7項目に整理して、確認・修正するだけ。</p>
+        <div style={{ fontFamily:mincho, fontSize:40, fontWeight:700, lineHeight:1.35, color:c.ink }}>話すだけで、<br/>カルテになる。</div>
+        <p style={{ color:c.inkSoft, fontSize:16, marginTop:16, lineHeight:1.8 }}>施術中の会話をそのまま記録。<br/>AIが7項目に整理して、確認・修正するだけ。</p>
       </div>
 
       {dropoutPatients.length > 0 && (
         <FollowUpSection patients={dropoutPatients} token={token} onSelect={onSelect} />
       )}
 
-      <div style={{ marginTop:28, display:"flex", gap:10 }}>
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="患者名・よみがなで検索"
-          style={{ flex:1, padding:"12px 14px", border:`1px solid ${c.line}`, borderRadius:10, fontSize:14, background:c.surface, color:c.ink }} />
-        <button onClick={() => setShowNew((v) => !v)} className="hov" style={ghostBtn}>＋ 新規患者</button>
+      {/* 検索エリア */}
+      <div style={{ marginTop:32, display:"flex", gap:12 }}>
+        <div style={{ flex:"1 1 70%", position:"relative", display:"flex", alignItems:"center" }}>
+          <span style={{ position:"absolute", left:16, fontSize:16, color:c.inkFaint }}>⌕</span>
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="患者名・よみがなで検索"
+            style={{ width:"100%", height:56, padding:"0 16px 0 42px", border:`1px solid ${c.line}`, borderRadius:16, fontSize:15, background:"#fff", color:c.ink }} />
+        </div>
+        <button onClick={() => setShowNew((v) => !v)} className="hov"
+          style={{ flex:"1 1 30%", height:56, display:"flex", alignItems:"center", justifyContent:"center", gap:6, background:c.brand, color:"#fff", border:"none", borderRadius:16, cursor:"pointer", fontSize:15, fontWeight:600 }}>
+          ＋ 新規患者
+        </button>
       </div>
+
       {showNew && (
-        <div className="rise" style={{ marginTop:12, padding:16, background:c.surface, border:`1px solid ${c.line}`, borderRadius:12 }}>
+        <div className="rise" style={{ marginTop:12, padding:20, background:"#fff", borderRadius:18, boxShadow:cardShadow }}>
           <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="氏名（必須）" style={inputS} />
             <input value={kana} onChange={(e) => setKana(e.target.value)} placeholder="よみがな" style={inputS} />
@@ -338,32 +455,77 @@ function Home({ patients, query, setQuery, onSelect, onNew, addPatient, token })
           </div>
         </div>
       )}
-      <div style={{ marginTop:30 }}>
-        <SectionLabel>患者一覧</SectionLabel>
-        {filtered.length === 0 && (
+
+      {/* 患者一覧 */}
+      <div style={{ marginTop:24 }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:16, color:c.brand }}>◷</span>
+            <span style={{ fontSize:15, fontWeight:600, color:c.ink }}>{query ? "検索結果" : "最近の患者"}</span>
+          </div>
+          {!query && patients.length > 5 && (
+            <button onClick={() => setShowAll(true)} className="hov" style={{ background:"none", border:"none", cursor:"pointer", color:c.brand, fontSize:14, fontWeight:600, padding:0 }}>
+              すべての患者を見る ›
+            </button>
+          )}
+        </div>
+
+        {displayed.length === 0 && (
           <div style={{ color:c.inkFaint, fontSize:14, padding:"24px 0" }}>
             {patients.length === 0 ? "「＋ 新規患者」から最初の患者を登録してください。" : "該当する患者がいません。"}
           </div>
         )}
-        <div style={{ display:"grid", gap:10, marginTop:12 }}>
-          {filtered.map((p) => {
-            const visits = p.visits || [];
-            const last = visits[0];
-            const lastKarte = last?.karte;
-            return (
-              <div key={p.id} className="card-hov" style={{ background:c.surface, border:`1px solid ${c.line}`, borderRadius:12, padding:16, display:"flex", justifyContent:"space-between", alignItems:"center", gap:12 }}>
-                <button onClick={() => onSelect(p)} style={{ background:"none", border:"none", cursor:"pointer", textAlign:"left", flex:1, padding:0 }}>
-                  <div style={{ fontSize:16, fontWeight:600, color:c.ink }}>{p.name}</div>
-                  <div style={{ fontSize:12, color:c.inkFaint, marginTop:3 }}>
-                    {p.kana || "—"} ・ 来院 {visits.length} 回
-                    {last ? ` ・ 最終 ${last.date}` : " ・ 未来院"}
-                    {lastKarte?.chief_complaint ? ` ・ ${lastKarte.chief_complaint}` : ""}
-                  </div>
-                </button>
-                <button onClick={() => onNew(p)} className="hov" style={ghostBtn}>施術を記録 →</button>
-              </div>
-            );
-          })}
+
+        <div style={{ display:"grid", gap:12 }}>
+          {displayed.map((p) => <PatientCard key={p.id} patient={p} onSelect={onSelect} onNew={onNew} />)}
+        </div>
+      </div>
+
+      {showAll && <AllPatientsModal patients={sortedByRecent} onClose={() => setShowAll(false)} onSelect={onSelect} onNew={onNew} />}
+    </div>
+  );
+}
+
+// ── 患者カード ────────────────────────────────────────────────
+function PatientCard({ patient, onSelect, onNew }) {
+  const visits = patient.visits || [];
+  const last = visits[0];
+  const initial = (patient.name || "?").trim().charAt(0);
+  return (
+    <div className="card-hov" style={{ background:"#fff", borderRadius:18, boxShadow:cardShadow, padding:20, display:"flex", alignItems:"center", gap:16 }}>
+      <div style={{ width:52, height:52, minWidth:52, borderRadius:"50%", background:c.brandSoft, color:c.brand, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, fontWeight:700, fontFamily:mincho }}>{initial}</div>
+      <button onClick={() => onSelect(patient)} style={{ background:"none", border:"none", cursor:"pointer", textAlign:"left", flex:1, padding:0 }}>
+        <div style={{ fontSize:18, fontWeight:700, color:c.ink }}>{patient.name}</div>
+        <div style={{ fontSize:13, color:c.inkSoft, marginTop:4 }}>
+          {patient.kana || "—"} ・ 来院 {visits.length} 回
+        </div>
+        <div style={{ fontSize:13, color:c.inkSoft, marginTop:2 }}>
+          {last ? `最終来院 ${last.date}` : "未来院"}
+        </div>
+      </button>
+      <button onClick={() => onNew(patient)} className="hov"
+        style={{ height:42, width:140, minWidth:140, display:"flex", alignItems:"center", justifyContent:"center", gap:4, background:"#fff", border:`1px solid ${c.line}`, borderRadius:12, color:c.brand, cursor:"pointer", fontSize:13, fontWeight:600 }}>
+        施術を記録 ›
+      </button>
+    </div>
+  );
+}
+
+// ── 全患者一覧モーダル ────────────────────────────────────────
+function AllPatientsModal({ patients, onClose, onSelect, onNew }) {
+  const [q, setQ] = useState("");
+  const list = patients.filter((p) => !q || p.name.replace(/\s/g,"").includes(q.replace(/\s/g,"")) || (p.kana||"").includes(q));
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, zIndex:50, background:"rgba(0,0,0,.35)", display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"40px 16px", overflowY:"auto" }}>
+      <div onClick={(e) => e.stopPropagation()} className="rise" style={{ width:"100%", maxWidth:640, background:c.paper, borderRadius:20, padding:24 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+          <div style={{ fontFamily:mincho, fontSize:22, fontWeight:700, color:c.ink }}>すべての患者（{patients.length}名）</div>
+          <button onClick={onClose} className="hov" style={{ background:"none", border:"none", fontSize:22, color:c.inkFaint, cursor:"pointer" }}>×</button>
+        </div>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="患者名・よみがなで検索"
+          style={{ width:"100%", height:48, padding:"0 16px", border:`1px solid ${c.line}`, borderRadius:14, fontSize:14, background:"#fff", color:c.ink, marginBottom:16 }} />
+        <div style={{ display:"grid", gap:10 }}>
+          {list.map((p) => <PatientCard key={p.id} patient={p} onSelect={(pt) => { onClose(); onSelect(pt); }} onNew={(pt) => { onClose(); onNew(pt); }} />)}
         </div>
       </div>
     </div>
@@ -620,176 +782,201 @@ function isSoapKarte(karte) {
 function PatientDetail({ patient, token, onBack, onNew, onLevelUpdated }) {
   const visits = (patient.visits || []).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   const [openId, setOpenId] = useState(visits[0]?.id || null);
-  const [tab, setTab] = useState("summary");
+  const [showAllHistory, setShowAllHistory] = useState(false);
   const insights = patient.insights;
   const hasVas = visits.some((v) => typeof v.vas === "number");
-
-  const tabs = [
-    { key: "summary", label: "サマリー" },
-    { key: "history", label: `来院履歴 (${visits.length})` },
-    { key: "vas", label: "痛みの推移" },
-  ];
+  const shownVisits = showAllHistory ? visits : visits.slice(0, 3);
 
   return (
-    <div style={{ paddingTop:28 }}>
+    <div style={{ paddingTop:24 }}>
       <BackRow onBack={onBack} label="ホームに戻る" />
-      <div style={{ marginTop:14, display:"flex", justifyContent:"space-between", alignItems:"flex-end", flexWrap:"wrap", gap:12 }}>
+
+      {/* 患者ヘッダー */}
+      <div style={{ marginTop:16, display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:12 }}>
         <div>
-          <div style={{ fontFamily:mincho, fontSize:26, color:c.ink }}>{patient.name}</div>
-          <div style={{ fontSize:12, color:c.inkFaint, marginTop:4 }}>{patient.kana || "—"} ・ 来院 {visits.length} 回</div>
+          <div style={{ fontFamily:mincho, fontSize:36, fontWeight:700, color:c.ink, lineHeight:1.2 }}>{patient.name}</div>
+          <div style={{ fontSize:16, color:c.inkSoft, marginTop:6 }}>{patient.kana || "—"} ・ 来院 {visits.length} 回</div>
         </div>
-        <button onClick={onNew} className="hov" style={primaryBtn}>＋ 今日の施術を記録</button>
+        <button onClick={onNew} className="hov"
+          style={{ height:56, padding:"0 22px", background:c.brand, color:"#fff", border:"none", borderRadius:16, cursor:"pointer", fontSize:15, fontWeight:600, boxShadow:cardShadow }}>
+          ＋ 今日の施術を記録
+        </button>
       </div>
 
-      <div style={{ marginTop:14 }}>
+      <div style={{ marginTop:16 }}>
         <LevelSelector patient={patient} token={token} onUpdated={onLevelUpdated} />
       </div>
 
-      {/* タブ */}
-      <div style={{ display:"flex", gap:4, marginTop:20, borderBottom:`1px solid ${c.line}` }}>
-        {tabs.map((t) => (
-          <button key={t.key} onClick={() => setTab(t.key)}
-            style={{ padding:"10px 16px", background:"none", border:"none", borderBottom:`2px solid ${tab===t.key ? c.brand : "transparent"}`, cursor:"pointer", fontSize:14, fontWeight:tab===t.key ? 600 : 400, color:tab===t.key ? c.brand : c.inkFaint, marginBottom:-1 }}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* サマリータブ */}
-      {tab === "summary" && (
-        insights ? (
-          <>
-            <div style={{ display:"flex", justifyContent:"flex-end", marginTop:16 }}>
-              <button onClick={() => exportSummaryPDF(patient)} className="hov" style={{ ...ghostBtn, fontSize:12, padding:"7px 12px" }}>📄 PDFで出力</button>
+      {/* 縦スクロール構成 */}
+      {insights ? (
+        <div style={{ display:"grid", gap:16, marginTop:24 }}>
+          <AiSummaryCard insights={insights} patient={patient} />
+          <TodayQuestionsCard insights={insights} />
+          {hasVas && (
+            <div style={{ background:"#fff", borderRadius:20, boxShadow:cardShadowLg, padding:24 }}>
+              <div style={{ fontSize:18, fontWeight:700, color:c.ink, marginBottom:16, fontFamily:mincho }}>痛みの推移</div>
+              <VasChart visits={visits} />
             </div>
-            <InsightsPanel insights={insights} />
-          </>
-        )
-        : <div style={{ color:c.inkFaint, fontSize:14, padding:"30px 0" }}>カルテを記録すると、AIサマリーが自動生成されます。</div>
-      )}
-
-      {/* 来院履歴タブ */}
-      {tab === "history" && (
-        <div style={{ marginTop:20 }}>
-          {visits.length === 0 && <div style={{ color:c.inkFaint, fontSize:14, padding:"20px 0" }}>まだ記録がありません。</div>}
-          <div style={{ display:"grid", gap:10 }}>
-            {visits.map((v) => {
-              const open = openId === v.id;
-              const karte = v.karte || {};
-              const sections = isSoapKarte(karte) ? SOAP_SECTIONS : SECTIONS;
-              const preview = karte.chief_complaint || karte.subjective || "記録内容あり";
-              return (
-                <div key={v.id} style={{ background:c.surface, border:`1px solid ${c.line}`, borderRadius:12, overflow:"hidden" }}>
-                  <button onClick={() => setOpenId(open ? null : v.id)}
-                    style={{ width:"100%", textAlign:"left", background:"none", border:"none", cursor:"pointer", padding:16, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                    <div>
-                      <div style={{ fontSize:14, fontWeight:600, color:c.ink }}>
-                        {v.date}
-                        {typeof v.vas === "number" && <span style={{ marginLeft:8, fontSize:11, fontWeight:600, padding:"2px 7px", borderRadius:5, background:c.brand+"1A", color:c.brand }}>痛み {v.vas}/10</span>}
-                      </div>
-                      <div style={{ fontSize:12, color:c.inkFaint, marginTop:3 }}>{preview}</div>
-                    </div>
-                    <span style={{ color:c.inkFaint, fontSize:18 }}>{open ? "−" : "+"}</span>
-                  </button>
-                  {open && (
-                    <div style={{ padding:"0 16px 16px", borderTop:`1px solid ${c.line}` }}>
-                      <div style={{ display:"grid", gap:8, marginTop:14 }}>
-                        {sections.map((s) => (
-                          <div key={s.key} style={{ display:"flex", gap:10 }}>
-                            <div style={{ minWidth:86, fontSize:12, color:c.inkSoft }}>
-                              <span style={{ fontFamily:mincho, color:c.brand, marginRight:4 }}>{s.num}</span>{s.label}
-                            </div>
-                            <div style={{ fontSize:13, color:c.ink, lineHeight:1.6, flex:1 }}>
-                              {karte[s.key] || <span style={{ color:c.inkFaint }}>—</span>}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          )}
         </div>
+      ) : (
+        <div style={{ color:c.inkFaint, fontSize:14, padding:"30px 0" }}>カルテを記録すると、AIサマリーが自動生成されます。</div>
       )}
 
-      {/* 痛みの推移タブ */}
-      {tab === "vas" && (
-        <div style={{ marginTop:20, background:c.surface, border:`1px solid ${c.line}`, borderRadius:14, padding:18 }}>
-          <VasChart visits={visits} />
+      {/* 来院履歴 */}
+      <div style={{ marginTop:28 }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
+          <div style={{ fontFamily:mincho, fontSize:20, fontWeight:700, color:c.ink }}>来院履歴</div>
+          {visits.length > 3 && (
+            <button onClick={() => setShowAllHistory((v) => !v)} className="hov" style={{ background:"none", border:"none", cursor:"pointer", color:c.brand, fontSize:14, fontWeight:600, padding:0 }}>
+              {showAllHistory ? "折りたたむ ›" : "すべての履歴を見る ›"}
+            </button>
+          )}
         </div>
-      )}
-    </div>
-  );
-}
-
-// ── AIサマリー・今日聞くこと・次回プラン ────────────────────
-function InsightsPanel({ insights }) {
-  const s = insights.summary || {};
-  const tq = insights.today_questions || {};
-  const hasAlert = s.alert && s.alert.trim().length > 0;
-
-  const summaryRows = [
-    ["基本情報", s.basic_info],
-    ["主訴・経過", s.chief_complaint_history],
-    ["生活・特徴", s.lifestyle],
-    ["注意点・禁忌", s.precautions],
-    ["前回の施術ポイント・反応", s.last_treatment],
-    ["セルフケア", s.self_care],
-  ].filter(([, v]) => v && v.trim());
-
-  return (
-    <div style={{ marginTop:24, display:"grid", gap:12 }}>
-      {hasAlert && (
-        <div style={{ background:"#FCEBEB", border:"1px solid #F0999599", borderRadius:12, padding:14, display:"flex", gap:10, alignItems:"flex-start" }}>
-          <span style={{ fontSize:16 }}>⚠️</span>
-          <div style={{ fontSize:13, color:"#791F1F", lineHeight:1.6 }}>{s.alert}</div>
-        </div>
-      )}
-
-      <div style={{ background:c.surface, border:`1px solid ${c.line}`, borderRadius:12, padding:16 }}>
-        <SectionLabel>AIサマリー</SectionLabel>
-        <div style={{ display:"grid", gap:10, marginTop:12 }}>
-          {summaryRows.length === 0 && <div style={{ fontSize:13, color:c.inkFaint }}>情報が蓄積されると自動で表示されます。</div>}
-          {summaryRows.map(([label, val]) => (
-            <div key={label} style={{ display:"flex", gap:10 }}>
-              <div style={{ minWidth:150, fontSize:12, color:c.inkSoft, fontWeight:600 }}>{label}</div>
-              <div style={{ fontSize:13, color:c.ink, lineHeight:1.6, flex:1 }}>{val}</div>
-            </div>
+        {visits.length === 0 && <div style={{ color:c.inkFaint, fontSize:14, padding:"20px 0" }}>まだ記録がありません。</div>}
+        <div style={{ display:"grid", gap:14 }}>
+          {shownVisits.map((v) => (
+            <VisitCard key={v.id} visit={v} open={openId === v.id} onToggle={() => setOpenId(openId === v.id ? null : v.id)} />
           ))}
         </div>
       </div>
+    </div>
+  );
+}
 
-      {(tq.symptom?.length > 0 || tq.conversation?.length > 0) && (
-        <div style={{ background:c.surface, border:`1px solid ${c.line}`, borderRadius:12, padding:16 }}>
-          <SectionLabel>今日聞くこと</SectionLabel>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginTop:12 }}>
-            <div>
-              <div style={{ fontSize:12, fontWeight:600, color:c.brand, marginBottom:6 }}>症状</div>
-              <ul style={{ margin:0, paddingLeft:18, fontSize:13, color:c.ink, lineHeight:1.8 }}>
-                {(tq.symptom || []).map((q, i) => <li key={i}>{q}</li>)}
-              </ul>
-            </div>
-            <div>
-              <div style={{ fontSize:12, fontWeight:600, color:c.brand, marginBottom:6 }}>会話</div>
-              <ul style={{ margin:0, paddingLeft:18, fontSize:13, color:c.ink, lineHeight:1.8 }}>
-                {(tq.conversation || []).map((q, i) => <li key={i}>{q}</li>)}
-              </ul>
-            </div>
-          </div>
+// ── AIサマリーカード（ダークグリーン）─────────────────────────
+function AiSummaryCard({ insights, patient }) {
+  const s = insights.summary || {};
+  const hasAlert = s.alert && s.alert.trim().length > 0;
+  const rows = [
+    ["主訴", s.chief_complaint_history],
+    ["経過", s.last_treatment],
+    ["生活・特徴", s.lifestyle],
+    ["注意点", s.precautions],
+  ].filter(([, v]) => v && v.trim());
+
+  return (
+    <div style={{ position:"relative", background:c.brand, borderRadius:20, padding:24, overflow:"hidden", boxShadow:cardShadowLg }}>
+      {/* 装飾（透明度低め） */}
+      <div style={{ position:"absolute", right:-20, bottom:-30, width:180, height:180, opacity:0.1, pointerEvents:"none" }}>
+        <svg viewBox="0 0 100 100" fill="none" stroke="#fff" strokeWidth="1.5">
+          <circle cx="50" cy="26" r="12" /><line x1="50" y1="38" x2="50" y2="70" />
+          <line x1="50" y1="46" x2="30" y2="60" /><line x1="50" y1="46" x2="70" y2="60" />
+          <line x1="50" y1="70" x2="36" y2="92" /><line x1="50" y1="70" x2="64" y2="92" />
+        </svg>
+      </div>
+
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <span style={{ background:"#fff", color:c.brand, fontSize:11, fontWeight:700, padding:"4px 10px", borderRadius:6, letterSpacing:1 }}>AI</span>
+          <span style={{ color:"#fff", fontSize:18, fontWeight:600, fontFamily:mincho }}>AI要約サマリー</span>
+        </div>
+        <button onClick={() => exportSummaryPDF(patient)} className="hov"
+          style={{ background:"rgba(255,255,255,.15)", border:"1px solid rgba(255,255,255,.3)", color:"#fff", borderRadius:10, padding:"6px 12px", fontSize:12, fontWeight:600, cursor:"pointer" }}>
+          📄 PDF
+        </button>
+      </div>
+
+      {hasAlert && (
+        <div style={{ background:"rgba(216,80,61,.25)", border:"1px solid rgba(255,180,170,.5)", borderRadius:10, padding:"10px 12px", marginBottom:16, fontSize:13, color:"#FFE3DE", lineHeight:1.6 }}>
+          ⚠️ {s.alert}
         </div>
       )}
 
+      <div style={{ display:"grid", gap:0, position:"relative", zIndex:1 }}>
+        {rows.length === 0 && <div style={{ color:"rgba(255,255,255,.6)", fontSize:13 }}>情報が蓄積されると表示されます。</div>}
+        {rows.map(([label, val], i) => (
+          <div key={label} style={{ display:"flex", gap:14, padding:"12px 0", borderTop: i === 0 ? "none" : "1px solid rgba(255,255,255,.15)" }}>
+            <div style={{ minWidth:88, fontSize:13, fontWeight:600, color:"rgba(255,255,255,.85)" }}>{label}</div>
+            <div style={{ fontSize:13, color:"#fff", lineHeight:1.7, flex:1 }}>{val}</div>
+          </div>
+        ))}
+      </div>
+
       {insights.next_plan && (
-        <div style={{ background:c.surface, border:`1px solid ${c.line}`, borderRadius:12, padding:16 }}>
-          <SectionLabel>次回施術プラン（AI提案）</SectionLabel>
-          <div style={{ fontSize:13, color:c.ink, lineHeight:1.7, marginTop:10 }}>{insights.next_plan}</div>
+        <div style={{ marginTop:16, paddingTop:16, borderTop:"1px solid rgba(255,255,255,.15)", position:"relative", zIndex:1 }}>
+          <div style={{ fontSize:12, fontWeight:600, color:"rgba(255,255,255,.7)", marginBottom:6 }}>次回施術プラン</div>
+          <div style={{ fontSize:13, color:"#fff", lineHeight:1.7 }}>{insights.next_plan}</div>
         </div>
       )}
     </div>
   );
 }
+
+// ── 今日聞くことカード（ゴールドアクセント）───────────────────
+function TodayQuestionsCard({ insights }) {
+  const tq = insights.today_questions || {};
+  const symptom = tq.symptom || [];
+  const conversation = tq.conversation || [];
+  if (symptom.length === 0 && conversation.length === 0) return null;
+
+  return (
+    <div style={{ position:"relative", background:"#fff", borderRadius:20, boxShadow:cardShadowLg, padding:24, borderLeft:`4px solid ${c.accent}`, overflow:"hidden" }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <div style={{ width:40, height:40, borderRadius:12, background:c.accent, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:18 }}>❝</div>
+          <div style={{ fontFamily:mincho, fontSize:20, fontWeight:600, color:c.accentDeep }}>今日聞くこと</div>
+        </div>
+        <span style={{ fontSize:13, color:c.inkFaint }}>次回来院の確認ポイント</span>
+      </div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20 }}>
+        <div>
+          <div style={{ fontSize:12, fontWeight:700, color:c.accentDeep, marginBottom:8 }}>症状について</div>
+          <ul style={{ margin:0, paddingLeft:18, fontSize:13, color:c.ink, lineHeight:2 }}>
+            {symptom.map((q, i) => <li key={i}>{q}</li>)}
+          </ul>
+        </div>
+        <div>
+          <div style={{ fontSize:12, fontWeight:700, color:c.accentDeep, marginBottom:8 }}>会話のきっかけ</div>
+          <ul style={{ margin:0, paddingLeft:18, fontSize:13, color:c.ink, lineHeight:2 }}>
+            {conversation.map((q, i) => <li key={i}>{q}</li>)}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── 来院履歴カード（ヘッダーがダークグリーン）─────────────────
+function VisitCard({ visit, open, onToggle }) {
+  const karte = visit.karte || {};
+  const sections = isSoapKarte(karte) ? SOAP_SECTIONS : SECTIONS;
+  const preview = karte.chief_complaint || karte.subjective || "記録内容あり";
+  return (
+    <div style={{ background:"#fff", borderRadius:20, boxShadow:cardShadow, overflow:"hidden" }}>
+      <button onClick={onToggle}
+        style={{ width:"100%", minHeight:60, textAlign:"left", background:c.brand, border:"none", cursor:"pointer", padding:"12px 18px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:10 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
+          <span style={{ fontSize:14, fontWeight:700, color:"#fff" }}>{visit.date}</span>
+          <span style={{ fontSize:12, color:"rgba(255,255,255,.8)" }}>{preview}</span>
+          {typeof visit.vas === "number" && (
+            <span style={{ fontSize:11, fontWeight:600, padding:"2px 10px", borderRadius:999, background:"rgba(255,255,255,.2)", color:"#fff" }}>痛み {visit.vas}/10</span>
+          )}
+        </div>
+        <span style={{ color:"#fff", fontSize:18 }}>{open ? "−" : "+"}</span>
+      </button>
+      {open && (
+        <div style={{ padding:"16px 18px" }}>
+          <div style={{ display:"grid", gap:10 }}>
+            {sections.map((s) => (
+              <div key={s.key} style={{ display:"flex", gap:12, alignItems:"flex-start" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6, minWidth:96 }}>
+                  <span style={{ width:22, height:22, borderRadius:"50%", background:c.brand, color:"#fff", fontSize:11, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:mincho }}>{s.num}</span>
+                  <span style={{ fontSize:12, color:c.inkSoft, fontWeight:600 }}>{s.label}</span>
+                </div>
+                <div style={{ fontSize:13, color:c.ink, lineHeight:1.7, flex:1 }}>
+                  {karte[s.key] || <span style={{ color:c.inkFaint }}>—</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 function SectionLabel({ children }) {
   return <div style={{ fontSize:11, letterSpacing:2, color:c.inkFaint, fontWeight:700 }}>{children}</div>;
@@ -806,9 +993,9 @@ function Toggle({ active, disabled, onClick, children }) {
   );
 }
 
-const inputS = { flex:1, minWidth:140, padding:"11px 13px", border:`1px solid #E4DFD4`, borderRadius:10, fontSize:14, background:"#F5F2EC", color:"#26231E" };
-const primaryBtn = { padding:"11px 18px", border:"none", borderRadius:10, background:"#0F5E54", color:"#fff", cursor:"pointer", fontSize:14, fontWeight:600 };
-const ghostBtn = { padding:"9px 14px", border:"1px solid #E4DFD4", borderRadius:10, background:"#FFFFFF", color:"#0F5E54", cursor:"pointer", fontSize:13, fontWeight:600, whiteSpace:"nowrap" };
+const inputS = { flex:1, minWidth:140, padding:"13px 14px", border:`1px solid ${c.line}`, borderRadius:14, fontSize:14, background:"#fff", color:c.ink };
+const primaryBtn = { padding:"13px 20px", border:"none", borderRadius:14, background:c.brand, color:"#fff", cursor:"pointer", fontSize:14, fontWeight:600 };
+const ghostBtn = { padding:"10px 14px", border:`1px solid ${c.line}`, borderRadius:12, background:"#fff", color:c.brand, cursor:"pointer", fontSize:13, fontWeight:600, whiteSpace:"nowrap" };
 
 // ── 要フォロー患者セクション（離脱リスク + LINE下書き）──────
 function FollowUpSection({ patients, token, onSelect }) {
