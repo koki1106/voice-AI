@@ -48,12 +48,24 @@ function daysSinceLastVisit(patient) {
   return Math.floor((Date.now() - latest) / (1000 * 60 * 60 * 24));
 }
 
-// 離脱リスク患者を抽出（30日以上来院なし）
+// 患者レベル定義（推奨来院間隔）
+const LEVELS = {
+  1: { label: "レベル1", desc: "メンテナンス", interval: 30, color: "#0F6E56", bg: "#E1F5EE" },
+  2: { label: "レベル2", desc: "アジャスト", interval: 14, color: "#854F0B", bg: "#FAEEDA" },
+  3: { label: "レベル3", desc: "集中ケア", interval: 7, color: "#A32D2D", bg: "#FCEBEB" },
+};
+
+// 離脱リスク患者を抽出（レベルの推奨間隔の2倍を超えたら要フォロー）
 function getDropoutRiskPatients(patients) {
   return patients
-    .map((p) => ({ ...p, daysSince: daysSinceLastVisit(p) }))
-    .filter((p) => p.daysSince !== null && p.daysSince >= 30)
-    .sort((a, b) => b.daysSince - a.daysSince);
+    .map((p) => {
+      const days = daysSinceLastVisit(p);
+      const level = LEVELS[p.level || 2];
+      const threshold = level.interval * 2;
+      return { ...p, daysSince: days, overdue: days !== null ? days - level.interval : null, threshold };
+    })
+    .filter((p) => p.daysSince !== null && p.daysSince >= p.threshold)
+    .sort((a, b) => (b.daysSince - b.threshold) - (a.daysSince - a.threshold));
 }
 
 async function apiFetch(path, options = {}, token = null) {
@@ -218,6 +230,7 @@ function MainApp({ session }) {
         ? { ...p, visits: [data.visit, ...(p.visits || [])], insights: data.insights || p.insights }
         : p
     ));
+    return data;
   }
 
   function openNewSession(patient) { setActivePatientId(patient.id); setView("session"); }
@@ -239,9 +252,12 @@ function MainApp({ session }) {
         ) : view === "session" && activePatient ? (
           <Session patient={activePatient} token={token}
             onCancel={() => setView("home")}
-            onSaved={async (visit) => { await saveVisit(activePatient.id, visit); setView("patient"); }} />
+            onSaved={async (visit) => { return await saveVisit(activePatient.id, visit); }}
+            onDone={() => setView("patient")} />
         ) : view === "patient" && activePatient ? (
-          <PatientDetail patient={activePatient} token={token} onBack={() => setView("home")} onNew={() => openNewSession(activePatient)} />
+          <PatientDetail patient={activePatient} token={token}
+            onBack={() => setView("home")} onNew={() => openNewSession(activePatient)}
+            onLevelUpdated={(lv) => setPatients((prev) => prev.map((p) => p.id === activePatient.id ? { ...p, level: lv } : p))} />
         ) : view === "chat" ? (
           <ChatView token={token} onBack={() => setView("home")} />
         ) : null}
@@ -384,7 +400,7 @@ function FormatGuide({ format }) {
   );
 }
 
-function Session({ patient, token, onCancel, onSaved }) {
+function Session({ patient, token, onCancel, onSaved, onDone }) {
   const [mode, setMode] = useState("voice");
   const [karteFormat, setKarteFormat] = useState("standard"); // standard | soap
   const [recording, setRecording] = useState(false);
@@ -395,6 +411,8 @@ function Session({ patient, token, onCancel, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [karte, setKarte] = useState(null);
   const [vas, setVas] = useState(null);
+  const [contraindication, setContraindication] = useState("");
+  const [thanks, setThanks] = useState(null);
   const [error, setError] = useState("");
   const [speechOK, setSpeechOK] = useState(true);
   const recogRef = useRef(null);
@@ -449,6 +467,7 @@ function Session({ patient, token, onCancel, onSaved }) {
       const base = karteFormat === "soap" ? emptySoap() : emptyKarte();
       setKarte({ ...base, ...data.karte });
       setVas(typeof data.vas === "number" ? data.vas : null);
+      setContraindication(data.contraindication || "");
     } catch(e) { setError(`カルテ生成に失敗しました: ${e.message}`); }
     finally { setGenerating(false); }
   }
@@ -456,12 +475,18 @@ function Session({ patient, token, onCancel, onSaved }) {
   async function handleSave() {
     setSaving(true);
     try {
-      await onSaved({ date: todayStr(), transcript: (transcript + " " + interim).trim(), karte, vas });
+      const result = await onSaved({ date: todayStr(), transcript: (transcript + " " + interim).trim(), karte, vas });
+      if (result && result.thanks) { setThanks(result.thanks); setSaving(false); }
     } catch(e) { setError(`保存に失敗しました: ${e.message}`); setSaving(false); }
   }
 
   const mmss = `${String(Math.floor(elapsed/60)).padStart(2,"0")}:${String(elapsed%60).padStart(2,"0")}`;
   const visits = patient.visits || [];
+
+  // 保存後：お礼メッセージ表示
+  if (thanks !== null) {
+    return <ThanksScreen patientName={patient.name} thanks={thanks} onDone={onDone} />;
+  }
 
   return (
     <div style={{ paddingTop:28 }}>
@@ -526,6 +551,15 @@ function Session({ patient, token, onCancel, onSaved }) {
 
       {karte && (
         <div style={{ marginTop:24 }}>
+          {contraindication && (
+            <div style={{ marginBottom:16, background:"#FCEBEB", border:"2px solid #E24B4A", borderRadius:12, padding:16, display:"flex", gap:12, alignItems:"flex-start" }}>
+              <span style={{ fontSize:22 }}>⚠️</span>
+              <div>
+                <div style={{ fontSize:14, fontWeight:700, color:"#A32D2D", marginBottom:4 }}>要注意：医療機関への紹介を検討してください</div>
+                <div style={{ fontSize:13, color:"#791F1F", lineHeight:1.6 }}>{contraindication}</div>
+              </div>
+            </div>
+          )}
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
             <SectionLabel>生成されたカルテ（確認・修正できます）</SectionLabel>
             <button onClick={() => { setKarte(null); setError(""); }} className="hov" style={ghostBtn}>↺ 入力に戻る</button>
@@ -583,7 +617,7 @@ function isSoapKarte(karte) {
   return karte && ("subjective" in karte || "objective" in karte || "assessment" in karte || "plan" in karte);
 }
 
-function PatientDetail({ patient, token, onBack, onNew }) {
+function PatientDetail({ patient, token, onBack, onNew, onLevelUpdated }) {
   const visits = (patient.visits || []).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   const [openId, setOpenId] = useState(visits[0]?.id || null);
   const [tab, setTab] = useState("summary");
@@ -607,6 +641,10 @@ function PatientDetail({ patient, token, onBack, onNew }) {
         <button onClick={onNew} className="hov" style={primaryBtn}>＋ 今日の施術を記録</button>
       </div>
 
+      <div style={{ marginTop:14 }}>
+        <LevelSelector patient={patient} token={token} onUpdated={onLevelUpdated} />
+      </div>
+
       {/* タブ */}
       <div style={{ display:"flex", gap:4, marginTop:20, borderBottom:`1px solid ${c.line}` }}>
         {tabs.map((t) => (
@@ -619,7 +657,14 @@ function PatientDetail({ patient, token, onBack, onNew }) {
 
       {/* サマリータブ */}
       {tab === "summary" && (
-        insights ? <InsightsPanel insights={insights} />
+        insights ? (
+          <>
+            <div style={{ display:"flex", justifyContent:"flex-end", marginTop:16 }}>
+              <button onClick={() => exportSummaryPDF(patient)} className="hov" style={{ ...ghostBtn, fontSize:12, padding:"7px 12px" }}>📄 PDFで出力</button>
+            </div>
+            <InsightsPanel insights={insights} />
+          </>
+        )
         : <div style={{ color:c.inkFaint, fontSize:14, padding:"30px 0" }}>カルテを記録すると、AIサマリーが自動生成されます。</div>
       )}
 
@@ -788,9 +833,11 @@ function FollowUpSection({ patients, token, onSelect }) {
     });
   }
 
-  function riskLevel(days) {
-    if (days >= 60) return { label: "離脱リスク高", color: "#A32D2D", bg: "#FCEBEB" };
-    if (days >= 45) return { label: "要注意", color: "#854F0B", bg: "#FAEEDA" };
+  function riskLevel(p) {
+    const info = LEVELS[p.level || 2];
+    const ratio = p.daysSince / info.interval;
+    if (ratio >= 4) return { label: "離脱リスク高", color: "#A32D2D", bg: "#FCEBEB" };
+    if (ratio >= 3) return { label: "要注意", color: "#854F0B", bg: "#FAEEDA" };
     return { label: "フォロー推奨", color: "#0F6E56", bg: "#E1F5EE" };
   }
 
@@ -802,13 +849,15 @@ function FollowUpSection({ patients, token, onSelect }) {
       </div>
       <div style={{ display:"grid", gap:10 }}>
         {patients.map((p) => {
-          const risk = riskLevel(p.daysSince);
+          const risk = riskLevel(p);
+          const info = LEVELS[p.level || 2];
           return (
             <div key={p.id} style={{ border:`1px solid ${c.line}`, borderRadius:10, padding:12 }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, flexWrap:"wrap" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
                   <button onClick={() => onSelect(p)} style={{ background:"none", border:"none", cursor:"pointer", padding:0, fontSize:15, fontWeight:600, color:c.ink }}>{p.name}</button>
                   <span style={{ fontSize:11, fontWeight:600, padding:"3px 8px", borderRadius:6, background:risk.bg, color:risk.color }}>{risk.label}</span>
+                  <span style={{ fontSize:10, color:info.color }}>{info.label}（{info.interval}日毎）</span>
                   <span style={{ fontSize:12, color:c.inkFaint }}>最終来院から {p.daysSince} 日</span>
                 </div>
                 <button onClick={() => makeDraft(p)} className="hov" style={{ ...ghostBtn, fontSize:12, padding:"7px 12px" }}>
@@ -966,4 +1015,96 @@ function ChatView({ token, onBack }) {
       </div>
     </div>
   );
+}
+
+// ── 保存後のお礼メッセージ画面 ────────────────────────────────
+function ThanksScreen({ patientName, thanks, onDone }) {
+  const [copied, setCopied] = useState(false);
+  function copy() {
+    navigator.clipboard.writeText(thanks).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+  }
+  return (
+    <div style={{ paddingTop:40, textAlign:"center" }} className="rise">
+      <div style={{ fontSize:44, marginBottom:12 }}>✓</div>
+      <div style={{ fontFamily:mincho, fontSize:22, color:c.ink }}>カルテを保存しました</div>
+      <div style={{ fontSize:13, color:c.inkSoft, marginTop:6 }}>{patientName}様の記録を追加しました。</div>
+
+      <div style={{ maxWidth:520, margin:"28px auto 0", textAlign:"left", background:c.surface, border:`1px solid ${c.line}`, borderRadius:14, padding:18 }}>
+        <SectionLabel>患者さまへのお礼メッセージ（AI生成）</SectionLabel>
+        <div style={{ background:c.paper, borderRadius:10, padding:14, fontSize:14, lineHeight:1.7, color:c.ink, whiteSpace:"pre-wrap", marginTop:12 }}>{thanks}</div>
+        <button onClick={copy} className="hov" style={{ ...primaryBtn, marginTop:12, fontSize:13, padding:"9px 16px" }}>
+          {copied ? "✓ コピーしました" : "📋 コピーして送る"}
+        </button>
+      </div>
+
+      <button onClick={onDone} className="hov" style={{ ...ghostBtn, marginTop:24 }}>患者ページへ →</button>
+    </div>
+  );
+}
+
+// ── 患者レベル設定 ────────────────────────────────────────────
+function LevelSelector({ patient, token, onUpdated }) {
+  const [level, setLevel] = useState(patient.level || 2);
+  const [saving, setSaving] = useState(false);
+
+  async function change(newLevel) {
+    setLevel(newLevel); setSaving(true);
+    try {
+      await apiFetch(`/api/patients/${patient.id}`, { method:"PATCH", body: JSON.stringify({ level: newLevel }) }, token);
+      onUpdated(newLevel);
+    } catch(e) { alert(e.message); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+      <span style={{ fontSize:12, color:c.inkFaint }}>通院レベル：</span>
+      {[1, 2, 3].map((lv) => {
+        const info = LEVELS[lv];
+        const active = level === lv;
+        return (
+          <button key={lv} onClick={() => change(lv)} disabled={saving} className="hov"
+            style={{ padding:"6px 12px", borderRadius:999, border:`1px solid ${active ? info.color : c.line}`, background:active ? info.bg : c.surface, color:active ? info.color : c.inkFaint, cursor:"pointer", fontSize:12, fontWeight:600 }}>
+            {info.label}・{info.desc}（{info.interval}日）
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── サマリーPDF出力 ───────────────────────────────────────────
+function exportSummaryPDF(patient) {
+  const insights = patient.insights;
+  const s = insights?.summary || {};
+  const rows = [
+    ["基本情報", s.basic_info],
+    ["主訴・経過", s.chief_complaint_history],
+    ["生活・特徴", s.lifestyle],
+    ["注意点・禁忌", s.precautions],
+    ["前回の施術ポイント・反応", s.last_treatment],
+    ["セルフケア", s.self_care],
+  ].filter(([, v]) => v && v.trim());
+
+  const win = window.open("", "_blank");
+  if (!win) { alert("ポップアップがブロックされました。許可してください。"); return; }
+  const esc = (t) => String(t || "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  win.document.write(`<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><title>${esc(patient.name)}様 サマリー</title>
+  <style>
+    body { font-family: 'Hiragino Mincho ProN', serif; color: #26231E; padding: 40px; line-height: 1.8; }
+    h1 { font-size: 22px; border-bottom: 2px solid #0F5E54; padding-bottom: 8px; }
+    .meta { color: #6B655B; font-size: 13px; margin-bottom: 24px; }
+    .row { margin-bottom: 16px; }
+    .label { font-weight: bold; color: #0F5E54; font-size: 13px; }
+    .val { font-size: 14px; margin-top: 4px; }
+    .next { background: #E4EEEB; padding: 14px; border-radius: 8px; margin-top: 20px; }
+    @media print { body { padding: 20px; } }
+  </style></head><body>
+  <h1>${esc(patient.name)} 様 施術サマリー</h1>
+  <div class="meta">${esc(patient.kana || "")} ／ 来院 ${(patient.visits||[]).length} 回 ／ 発行日 ${todayStr()}</div>
+  ${rows.map(([label, val]) => `<div class="row"><div class="label">${esc(label)}</div><div class="val">${esc(val)}</div></div>`).join("")}
+  ${insights?.next_plan ? `<div class="next"><div class="label">次回施術プラン</div><div class="val">${esc(insights.next_plan)}</div></div>` : ""}
+  </body></html>`);
+  win.document.close();
+  setTimeout(() => win.print(), 400);
 }
