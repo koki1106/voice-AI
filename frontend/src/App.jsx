@@ -13,16 +13,39 @@ const gothic = "'Noto Sans JP','Hiragino Kaku Gothic ProN','Yu Gothic','Meiryo',
 const cardShadow = "0 2px 12px rgba(0,0,0,0.06)";
 const cardShadowLg = "0 6px 20px rgba(0,0,0,0.08)";
 
-const SECTIONS = [
-  { key: "patient",         num: "①", q: "誰？",          label: "患者情報",   hint: "患者名・来院回数" },
-  { key: "chief_complaint", num: "②", q: "今日何が辛い？", label: "主訴・症状", hint: "主な訴え・部位・痛みのレベル" },
-  { key: "comparison",      num: "③", q: "前回と比べて？", label: "前回比較",   hint: "改善・悪化・変化なし" },
-  { key: "treatment",       num: "④", q: "何をした？",     label: "施術内容",   hint: "施術箇所・アプローチ手技" },
-  { key: "response",        num: "⑤", q: "どうなった？",   label: "施術後反応", hint: "施術後の反応・変化" },
-  { key: "lifestyle",       num: "⑥", q: "生活の話",       label: "生活情報",   hint: "仕事・睡眠・運動・ストレス" },
-  { key: "next_plan",       num: "⑦", q: "次どうする？",   label: "次回方針",   hint: "次回提案・注意事項" },
+// カルテ項目マスター（全候補）。defaultOn=true が初期表示項目
+const ALL_FIELDS = [
+  { key: "patient",         num: "①", q: "誰？",          label: "患者情報",   hint: "患者名・来院回数", defaultOn: true },
+  { key: "chief_complaint", num: "②", q: "今日何が辛い？", label: "主訴・症状", hint: "主な訴え・部位・痛みのレベル", defaultOn: true },
+  { key: "comparison",      num: "③", q: "前回と比べて？", label: "前回比較",   hint: "改善・悪化・変化なし", defaultOn: true },
+  { key: "treatment",       num: "④", q: "何をした？",     label: "施術内容",   hint: "施術箇所・アプローチ手技", defaultOn: true },
+  { key: "response",        num: "⑤", q: "どうなった？",   label: "施術後反応", hint: "施術後の反応・変化", defaultOn: true },
+  { key: "lifestyle",       num: "⑥", q: "生活の話",       label: "生活情報",   hint: "仕事・睡眠・運動・ストレス", defaultOn: true },
+  { key: "next_plan",       num: "⑦", q: "次どうする？",   label: "次回方針",   hint: "次回提案・注意事項", defaultOn: true },
+  // 追加候補（初期はオフ）
+  { key: "posture",         num: "⑧", q: "姿勢・体の歪みは？", label: "姿勢・アライメント", hint: "猫背・骨盤の歪み・脚長差など", defaultOn: false },
+  { key: "range_of_motion", num: "⑨", q: "可動域は？",     label: "可動域(ROM)", hint: "関節可動域・制限のある動き", defaultOn: false },
+  { key: "palpation",       num: "⑩", q: "触診所見は？",   label: "触診所見",   hint: "筋緊張・圧痛点・硬結", defaultOn: false },
+  { key: "homework",        num: "⑪", q: "宿題・セルフケアは？", label: "セルフケア指導", hint: "ストレッチ・エクササイズの指示", defaultOn: false },
+  { key: "mental",          num: "⑫", q: "メンタル・気分は？", label: "メンタル面", hint: "ストレス・気分・モチベーション", defaultOn: false },
+  { key: "goal",            num: "⑬", q: "目標は？",       label: "目標設定",   hint: "患者の目標・ゴール", defaultOn: false },
 ];
-const emptyKarte = () => SECTIONS.reduce((a, s) => ({ ...a, [s.key]: "" }), {});
+
+// デフォルトで有効な項目キー
+const DEFAULT_FIELD_KEYS = ALL_FIELDS.filter((f) => f.defaultOn).map((f) => f.key);
+
+// 選択されたキー配列からSECTION配列を作る（番号は振り直し）
+const NUM_CIRCLE = ["①","②","③","④","⑤","⑥","⑦","⑧","⑨","⑩","⑪","⑫","⑬","⑭","⑮"];
+function fieldsToSections(keys) {
+  const list = (keys && keys.length ? keys : DEFAULT_FIELD_KEYS)
+    .map((k) => ALL_FIELDS.find((f) => f.key === k))
+    .filter(Boolean);
+  return list.map((f, i) => ({ ...f, num: NUM_CIRCLE[i] || "・" }));
+}
+
+// 後方互換: SECTIONS はデフォルト構成
+const SECTIONS = fieldsToSections(DEFAULT_FIELD_KEYS);
+const emptyKarte = (sections = SECTIONS) => sections.reduce((a, s) => ({ ...a, [s.key]: "" }), {});
 
 const SAMPLE = `田中さんこんにちは、今日で3回目ですね。調子はいかがですか。
 実は先週から右の肩がまた重くて、特に朝起きた時がつらいんです。前回は少し楽になったんですけど。
@@ -290,11 +313,13 @@ function MainApp({ session }) {
   const [activePatientId, setActivePatientId] = useState(null);
   const [query, setQuery] = useState("");
   const [dataLoading, setDataLoading] = useState(true);
+  const [fieldKeys, setFieldKeys] = useState(DEFAULT_FIELD_KEYS);
 
   const token = session.access_token;
   const activePatient = patients.find((p) => p.id === activePatientId) || null;
+  const sections = fieldsToSections(fieldKeys);
 
-  useEffect(() => { loadPatients(); }, []);
+  useEffect(() => { loadPatients(); loadSettings(); }, []);
 
   async function loadPatients() {
     setDataLoading(true);
@@ -306,6 +331,20 @@ function MainApp({ session }) {
     } finally {
       setDataLoading(false);
     }
+  }
+
+  async function loadSettings() {
+    try {
+      const data = await apiFetch("/api/settings", {}, token);
+      if (data.karte_fields && data.karte_fields.length) setFieldKeys(data.karte_fields);
+    } catch (e) { console.error(e); }
+  }
+
+  async function saveSettings(keys) {
+    setFieldKeys(keys);
+    try {
+      await apiFetch("/api/settings", { method:"PUT", body: JSON.stringify({ karte_fields: keys }) }, token);
+    } catch (e) { alert(e.message); }
   }
 
   async function addPatient(name, kana) {
@@ -327,6 +366,25 @@ function MainApp({ session }) {
     return data;
   }
 
+  async function updateVisit(patientId, visitId, patch) {
+    const data = await apiFetch(`/api/visits/${visitId}`, { method:"PATCH", body: JSON.stringify(patch) }, token);
+    setPatients((prev) => prev.map((p) =>
+      p.id === patientId
+        ? { ...p, visits: (p.visits || []).map((v) => v.id === visitId ? { ...v, ...data.visit } : v) }
+        : p
+    ));
+    return data;
+  }
+
+  async function deleteVisit(patientId, visitId) {
+    await apiFetch(`/api/visits/${visitId}`, { method:"DELETE" }, token);
+    setPatients((prev) => prev.map((p) =>
+      p.id === patientId
+        ? { ...p, visits: (p.visits || []).filter((v) => v.id !== visitId) }
+        : p
+    ));
+  }
+
   function openNewSession(patient) { setActivePatientId(patient.id); setView("session"); }
 
   async function handleLogout() {
@@ -335,7 +393,7 @@ function MainApp({ session }) {
 
   return (
     <>
-      <Header onHome={() => setView("home")} onChat={() => setView("chat")} onLogout={handleLogout} email={session.user.email} />
+      <Header onHome={() => setView("home")} onStats={() => setView("stats")} onSettings={() => setView("settings")} onChat={() => setView("chat")} onLogout={handleLogout} email={session.user.email} />
       <div style={{ maxWidth:860, margin:"0 auto", padding:"0 20px 80px" }}>
         {dataLoading ? (
           <div style={{ textAlign:"center", padding:"60px 0", color:c.inkFaint }}>読み込み中…</div>
@@ -344,16 +402,22 @@ function MainApp({ session }) {
             onSelect={(p) => { setActivePatientId(p.id); setView("patient"); }}
             onNew={openNewSession} addPatient={addPatient} />
         ) : view === "session" && activePatient ? (
-          <Session patient={activePatient} token={token}
+          <Session patient={activePatient} token={token} sections={sections}
             onCancel={() => setView("home")}
             onSaved={async (visit) => { return await saveVisit(activePatient.id, visit); }}
             onDone={() => setView("patient")} />
         ) : view === "patient" && activePatient ? (
           <PatientDetail patient={activePatient} token={token}
             onBack={() => setView("home")} onNew={() => openNewSession(activePatient)}
-            onLevelUpdated={(lv) => setPatients((prev) => prev.map((p) => p.id === activePatient.id ? { ...p, level: lv } : p))} />
+            onLevelUpdated={(lv) => setPatients((prev) => prev.map((p) => p.id === activePatient.id ? { ...p, level: lv } : p))}
+            onUpdateVisit={(vid, patch) => updateVisit(activePatient.id, vid, patch)}
+            onDeleteVisit={(vid) => deleteVisit(activePatient.id, vid)} />
         ) : view === "chat" ? (
           <ChatView token={token} onBack={() => setView("home")} />
+        ) : view === "stats" ? (
+          <StatsView token={token} onBack={() => setView("home")} />
+        ) : view === "settings" ? (
+          <SettingsView fieldKeys={fieldKeys} onSave={saveSettings} onBack={() => setView("home")} />
         ) : null}
       </div>
     </>
@@ -361,30 +425,50 @@ function MainApp({ session }) {
 }
 
 // ── ヘッダー ──────────────────────────────────────────────────
-function Header({ onHome, onChat, onLogout, email }) {
+function Header({ onHome, onStats, onSettings, onChat, onLogout, email }) {
+  const [menuOpen, setMenuOpen] = useState(false);
   return (
-    <div style={{ borderBottom:`1px solid ${c.line}`, background:"#fff", position:"sticky", top:0, zIndex:10 }}>
-      <div style={{ maxWidth:860, margin:"0 auto", height:72, padding:"0 20px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-        <button onClick={onHome} style={{ background:"none", border:"none", cursor:"pointer", padding:0, display:"flex", alignItems:"center", gap:12 }}>
-          <div style={{ width:44, height:44, borderRadius:12, background:c.brand, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:22 }}>◔</div>
-          <div style={{ textAlign:"left" }}>
-            <div style={{ fontFamily:mincho, fontSize:22, fontWeight:700, letterSpacing:1, color:c.ink }}>音声カルテ</div>
-            <div style={{ fontSize:11, letterSpacing:2, color:c.inkFaint, marginTop:-1 }}>VOICE AI KARTE</div>
+    <div style={{ borderBottom:`1px solid ${c.line}`, background:"#fff", position:"sticky", top:0, zIndex:20 }}>
+      <div style={{ maxWidth:860, margin:"0 auto", height:72, padding:"0 20px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
+        <button onClick={onHome} style={{ background:"none", border:"none", cursor:"pointer", padding:0, display:"flex", alignItems:"center", gap:12, minWidth:0 }}>
+          <div style={{ width:44, height:44, minWidth:44, borderRadius:12, background:c.brand, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:22 }}>◔</div>
+          <div style={{ textAlign:"left", minWidth:0 }}>
+            <div style={{ fontFamily:mincho, fontSize:22, fontWeight:700, letterSpacing:1, color:c.ink, whiteSpace:"nowrap", lineHeight:1.2 }}>音声カルテ</div>
+            <div style={{ fontSize:10, letterSpacing:1.5, color:c.inkFaint, whiteSpace:"nowrap", lineHeight:1.2 }}>VOICE&nbsp;AI&nbsp;KARTE</div>
           </div>
         </button>
-        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <button onClick={onChat} className="hov" style={headerBtn}>
-            <span style={{ fontSize:15 }}>◇</span> AI相談
-          </button>
-          <button onClick={onLogout} className="hov" style={headerBtn}>
-            <span style={{ fontSize:15 }}>⏻</span> ログアウト
-          </button>
+
+        {/* デスクトップ：横並び */}
+        <div className="hdr-desktop" style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <button onClick={onStats} className="hov" style={headerBtn}>◫ 統計</button>
+          <button onClick={onSettings} className="hov" style={headerBtn}>⚙ 設定</button>
+          <button onClick={onChat} className="hov" style={headerBtn}>◇ AI相談</button>
+          <button onClick={onLogout} className="hov" style={headerBtn}>⏻ ログアウト</button>
+        </div>
+
+        {/* モバイル：ハンバーガー */}
+        <div className="hdr-mobile" style={{ position:"relative" }}>
+          <button onClick={() => setMenuOpen((v) => !v)} className="hov" style={{ ...headerBtn, padding:"0 12px" }}>☰</button>
+          {menuOpen && (
+            <div style={{ position:"absolute", right:0, top:52, background:"#fff", border:`1px solid ${c.line}`, borderRadius:14, boxShadow:cardShadowLg, padding:6, minWidth:160, zIndex:30 }}>
+              {[["◫ 統計", onStats], ["⚙ 設定", onSettings], ["◇ AI相談", onChat], ["⏻ ログアウト", onLogout]].map(([label, fn]) => (
+                <button key={label} onClick={() => { setMenuOpen(false); fn(); }} className="hov"
+                  style={{ display:"block", width:"100%", textAlign:"left", background:"none", border:"none", padding:"11px 12px", borderRadius:10, cursor:"pointer", fontSize:14, color:c.ink, fontWeight:500 }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
+      <style>{`
+        @media (max-width: 640px) { .hdr-desktop { display: none !important; } .hdr-mobile { display: block !important; } }
+        @media (min-width: 641px) { .hdr-mobile { display: none !important; } }
+      `}</style>
     </div>
   );
 }
-const headerBtn = { height:44, padding:"0 14px", display:"flex", alignItems:"center", gap:6, background:"#fff", border:`1px solid ${c.line}`, borderRadius:14, color:c.brand, cursor:"pointer", fontSize:13, fontWeight:600 };
+const headerBtn = { height:44, padding:"0 14px", display:"flex", alignItems:"center", gap:6, background:"#fff", border:`1px solid ${c.line}`, borderRadius:14, color:c.brand, cursor:"pointer", fontSize:13, fontWeight:600, whiteSpace:"nowrap" };
 
 // ── ホーム ────────────────────────────────────────────────────
 function Home({ patients, query, setQuery, onSelect, onNew, addPatient, token }) {
@@ -542,8 +626,8 @@ const SOAP_SECTIONS = [
 const emptySoap = () => SOAP_SECTIONS.reduce((a, s) => ({ ...a, [s.key]: "" }), {});
 
 // ── フォーマット別ガイド（録音前に見る「聞くこと」チェックリスト）──
-function FormatGuide({ format }) {
-  const items = format === "soap" ? SOAP_SECTIONS : SECTIONS;
+function FormatGuide({ format, sections = SECTIONS }) {
+  const items = format === "soap" ? SOAP_SECTIONS : sections;
   return (
     <div style={{ marginTop:12, background:c.brand+"0D", border:`1px solid ${c.brand}33`, borderRadius:12, padding:"12px 16px" }}>
       <div style={{ fontSize:11, letterSpacing:1, color:c.brand, fontWeight:700, marginBottom:8 }}>
@@ -562,7 +646,7 @@ function FormatGuide({ format }) {
   );
 }
 
-function Session({ patient, token, onCancel, onSaved, onDone }) {
+function Session({ patient, token, onCancel, onSaved, onDone, sections = SECTIONS }) {
   const [mode, setMode] = useState("voice");
   const [karteFormat, setKarteFormat] = useState("standard"); // standard | soap
   const [recording, setRecording] = useState(false);
@@ -626,7 +710,7 @@ function Session({ patient, token, onCancel, onSaved, onDone }) {
     setError(""); setGenerating(true);
     try {
       const data = await apiFetch("/api/generate-karte", { method:"POST", body: JSON.stringify({ transcript: src, format: karteFormat }) }, token);
-      const base = karteFormat === "soap" ? emptySoap() : emptyKarte();
+      const base = karteFormat === "soap" ? emptySoap() : emptyKarte(sections);
       setKarte({ ...base, ...data.karte });
       setVas(typeof data.vas === "number" ? data.vas : null);
       setContraindication(data.contraindication || "");
@@ -671,7 +755,7 @@ function Session({ patient, token, onCancel, onSaved, onDone }) {
             <Toggle active={karteFormat==="soap"} onClick={() => setKarteFormat("soap")}>SOAP</Toggle>
           </div>
 
-          <FormatGuide format={karteFormat} />
+          <FormatGuide format={karteFormat} sections={sections} />
 
           {!speechOK && <div style={{ fontSize:12, color:c.amber, marginTop:8 }}>※ テキスト入力をご利用ください。</div>}
 
@@ -727,7 +811,7 @@ function Session({ patient, token, onCancel, onSaved, onDone }) {
             <button onClick={() => { setKarte(null); setError(""); }} className="hov" style={ghostBtn}>↺ 入力に戻る</button>
           </div>
           <div style={{ display:"grid", gap:10, marginTop:14 }}>
-            {(karteFormat === "soap" ? SOAP_SECTIONS : SECTIONS).map((s, i) => (
+            {(karteFormat === "soap" ? SOAP_SECTIONS : sections).map((s, i) => (
               <div key={s.key} className="rise" style={{ background:c.surface, border:`1px solid ${c.line}`, borderRadius:12, padding:14, animationDelay:`${i*70}ms` }}>
                 <div style={{ display:"flex", alignItems:"baseline", gap:8, marginBottom:6 }}>
                   <span style={{ fontFamily:mincho, fontSize:20, color:c.brand }}>{s.num}</span>
@@ -779,7 +863,7 @@ function isSoapKarte(karte) {
   return karte && ("subjective" in karte || "objective" in karte || "assessment" in karte || "plan" in karte);
 }
 
-function PatientDetail({ patient, token, onBack, onNew, onLevelUpdated }) {
+function PatientDetail({ patient, token, onBack, onNew, onLevelUpdated, onUpdateVisit, onDeleteVisit }) {
   const visits = (patient.visits || []).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   const [openId, setOpenId] = useState(visits[0]?.id || null);
   const [showAllHistory, setShowAllHistory] = useState(false);
@@ -836,7 +920,8 @@ function PatientDetail({ patient, token, onBack, onNew, onLevelUpdated }) {
         {visits.length === 0 && <div style={{ color:c.inkFaint, fontSize:14, padding:"20px 0" }}>まだ記録がありません。</div>}
         <div style={{ display:"grid", gap:14 }}>
           {shownVisits.map((v) => (
-            <VisitCard key={v.id} visit={v} open={openId === v.id} onToggle={() => setOpenId(openId === v.id ? null : v.id)} />
+            <VisitCard key={v.id} visit={v} open={openId === v.id} onToggle={() => setOpenId(openId === v.id ? null : v.id)}
+              onUpdate={onUpdateVisit} onDelete={onDeleteVisit} />
           ))}
         </div>
       </div>
@@ -939,10 +1024,33 @@ function TodayQuestionsCard({ insights }) {
 }
 
 // ── 来院履歴カード（ヘッダーがダークグリーン）─────────────────
-function VisitCard({ visit, open, onToggle }) {
+function VisitCard({ visit, open, onToggle, onUpdate, onDelete }) {
   const karte = visit.karte || {};
-  const sections = isSoapKarte(karte) ? SOAP_SECTIONS : SECTIONS;
+  const isSoap = isSoapKarte(karte);
+  const sections = isSoap ? SOAP_SECTIONS : fieldsToSections(Object.keys(karte).filter((k) => ALL_FIELDS.some((f) => f.key === k)));
+  const displaySections = sections.length ? sections : (isSoap ? SOAP_SECTIONS : SECTIONS);
   const preview = karte.chief_complaint || karte.subjective || "記録内容あり";
+
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(karte);
+  const [draftDate, setDraftDate] = useState(visit.date);
+  const [draftVas, setDraftVas] = useState(visit.vas ?? null);
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    try {
+      await onUpdate(visit.id, { date: draftDate, karte: draft, vas: draftVas });
+      setEditing(false);
+    } catch (e) { alert(e.message); }
+    finally { setSaving(false); }
+  }
+
+  async function remove() {
+    if (!window.confirm("このカルテを削除しますか？この操作は取り消せません。")) return;
+    try { await onDelete(visit.id); } catch (e) { alert(e.message); }
+  }
+
   return (
     <div style={{ background:"#fff", borderRadius:20, boxShadow:cardShadow, overflow:"hidden" }}>
       <button onClick={onToggle}
@@ -958,19 +1066,49 @@ function VisitCard({ visit, open, onToggle }) {
       </button>
       {open && (
         <div style={{ padding:"16px 18px" }}>
-          <div style={{ display:"grid", gap:10 }}>
-            {sections.map((s) => (
-              <div key={s.key} style={{ display:"flex", gap:12, alignItems:"flex-start" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:6, minWidth:96 }}>
-                  <span style={{ width:22, height:22, borderRadius:"50%", background:c.brand, color:"#fff", fontSize:11, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:mincho }}>{s.num}</span>
-                  <span style={{ fontSize:12, color:c.inkSoft, fontWeight:600 }}>{s.label}</span>
-                </div>
-                <div style={{ fontSize:13, color:c.ink, lineHeight:1.7, flex:1 }}>
-                  {karte[s.key] || <span style={{ color:c.inkFaint }}>—</span>}
-                </div>
+          {!editing ? (
+            <>
+              <div style={{ display:"grid", gap:10 }}>
+                {displaySections.map((s) => (
+                  <div key={s.key} style={{ display:"flex", gap:12, alignItems:"flex-start" }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:6, minWidth:96 }}>
+                      <span style={{ width:22, height:22, borderRadius:"50%", background:c.brand, color:"#fff", fontSize:11, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:mincho }}>{s.num}</span>
+                      <span style={{ fontSize:12, color:c.inkSoft, fontWeight:600 }}>{s.label}</span>
+                    </div>
+                    <div style={{ fontSize:13, color:c.ink, lineHeight:1.7, flex:1 }}>
+                      {karte[s.key] || <span style={{ color:c.inkFaint }}>—</span>}
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+              <div style={{ display:"flex", gap:8, marginTop:16, justifyContent:"flex-end" }}>
+                <button onClick={() => { setDraft(karte); setDraftDate(visit.date); setDraftVas(visit.vas ?? null); setEditing(true); }} className="hov" style={{ ...ghostBtn, fontSize:12, padding:"7px 14px" }}>✎ 編集</button>
+                <button onClick={remove} className="hov" style={{ ...ghostBtn, fontSize:12, padding:"7px 14px", color:c.rec, borderColor:"#F0B4AC" }}>🗑 削除</button>
+              </div>
+            </>
+          ) : (
+            <div style={{ display:"grid", gap:12 }}>
+              <div>
+                <div style={{ fontSize:12, color:c.inkSoft, fontWeight:600, marginBottom:4 }}>来院日</div>
+                <input value={draftDate} onChange={(e) => setDraftDate(e.target.value)} style={{ ...inputS, flex:"unset", width:160 }} />
+              </div>
+              {displaySections.map((s) => (
+                <div key={s.key}>
+                  <div style={{ fontSize:12, color:c.inkSoft, fontWeight:600, marginBottom:4 }}>{s.num} {s.label}</div>
+                  <textarea value={draft[s.key] || ""} onChange={(e) => setDraft({ ...draft, [s.key]: e.target.value })}
+                    style={{ width:"100%", minHeight:44, padding:"8px 10px", border:`1px solid ${c.line}`, borderRadius:8, fontSize:13, lineHeight:1.6, background:"#fff", color:c.ink, resize:"vertical" }} />
+                </div>
+              ))}
+              <div>
+                <div style={{ fontSize:12, color:c.inkSoft, fontWeight:600, marginBottom:4 }}>痛みスコア（VAS）: {draftVas ?? "—"}</div>
+                <input type="range" min="0" max="10" step="1" value={draftVas ?? 0} onChange={(e) => setDraftVas(Number(e.target.value))} style={{ width:"100%" }} />
+              </div>
+              <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
+                <button onClick={() => setEditing(false)} className="hov" style={{ ...ghostBtn, fontSize:12, padding:"8px 14px" }}>キャンセル</button>
+                <button onClick={save} disabled={saving} className="hov" style={{ ...primaryBtn, fontSize:12, padding:"8px 16px", opacity:saving ? 0.7 : 1 }}>{saving ? "保存中…" : "保存"}</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1294,4 +1432,138 @@ function exportSummaryPDF(patient) {
   </body></html>`);
   win.document.close();
   setTimeout(() => win.print(), 400);
+}
+
+// ── 統計・傾向分析ダッシュボード ──────────────────────────────
+function StatsView({ token, onBack }) {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    apiFetch("/api/stats", {}, token)
+      .then((d) => setStats(d))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [token]);
+
+  if (loading) return <div style={{ paddingTop:40, textAlign:"center", color:c.inkFaint }}>集計中…</div>;
+  if (error) return <div style={{ paddingTop:28 }}><BackRow onBack={onBack} label="ホームに戻る" /><div style={{ marginTop:20, color:c.rec }}>{error}</div></div>;
+
+  const maxCount = Math.max(1, ...stats.monthlyTrend.map((m) => m.count));
+
+  const cards = [
+    { label: "登録患者数", value: stats.totalPatients, unit: "名" },
+    { label: "累計来院数", value: stats.totalVisits, unit: "回" },
+    { label: "アクティブ患者", value: stats.activePatients, unit: "名", sub: "30日以内に来院" },
+    { label: "要フォロー", value: stats.dropoutPatients, unit: "名", sub: "離脱リスク", warn: stats.dropoutPatients > 0 },
+    { label: "平均来院回数", value: stats.avgVisits, unit: "回/人" },
+    { label: "平均改善率", value: stats.vasImprovement !== null ? stats.vasImprovement : "—", unit: stats.vasImprovement !== null ? "%" : "", sub: "VAS初回→最新" },
+  ];
+
+  return (
+    <div style={{ paddingTop:24 }}>
+      <BackRow onBack={onBack} label="ホームに戻る" />
+      <div style={{ marginTop:16, marginBottom:20 }}>
+        <div style={{ fontFamily:mincho, fontSize:32, fontWeight:700, color:c.ink }}>店舗の統計</div>
+        <div style={{ fontSize:14, color:c.inkSoft, marginTop:6 }}>院全体の傾向を把握できます。</div>
+      </div>
+
+      {/* KPIカード */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(150px, 1fr))", gap:12 }}>
+        {cards.map((k) => (
+          <div key={k.label} style={{ background:"#fff", borderRadius:18, boxShadow:cardShadow, padding:18 }}>
+            <div style={{ fontSize:12, color:c.inkSoft, marginBottom:6 }}>{k.label}</div>
+            <div style={{ fontSize:30, fontWeight:700, color: k.warn ? c.rec : c.brand, fontFamily:mincho, lineHeight:1 }}>
+              {k.value}<span style={{ fontSize:13, color:c.inkFaint, fontWeight:400, marginLeft:2 }}>{k.unit}</span>
+            </div>
+            {k.sub && <div style={{ fontSize:11, color:c.inkFaint, marginTop:6 }}>{k.sub}</div>}
+          </div>
+        ))}
+      </div>
+
+      {/* 月別来院数グラフ */}
+      <div style={{ marginTop:20, background:"#fff", borderRadius:20, boxShadow:cardShadowLg, padding:24 }}>
+        <div style={{ fontSize:18, fontWeight:700, color:c.ink, marginBottom:20, fontFamily:mincho }}>月別来院数（直近6ヶ月）</div>
+        <div style={{ display:"flex", alignItems:"flex-end", gap:12, height:180 }}>
+          {stats.monthlyTrend.map((m) => (
+            <div key={m.month} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:8 }}>
+              <div style={{ fontSize:13, fontWeight:600, color:c.brand }}>{m.count}</div>
+              <div style={{ width:"100%", maxWidth:44, height:`${(m.count / maxCount) * 130}px`, minHeight:m.count > 0 ? 6 : 2, background: m.count > 0 ? c.brand : c.line, borderRadius:"8px 8px 0 0", transition:"height .3s ease" }} />
+              <div style={{ fontSize:11, color:c.inkFaint }}>{m.month.split("/")[1]}月</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {stats.avgVasFirst !== null && (
+        <div style={{ marginTop:16, background:c.brandSoft, borderRadius:18, padding:20 }}>
+          <div style={{ fontSize:13, color:c.brand, fontWeight:600, marginBottom:8 }}>痛みスコアの平均改善</div>
+          <div style={{ display:"flex", alignItems:"center", gap:16 }}>
+            <div style={{ fontSize:15, color:c.ink }}>初回 平均 <b style={{ fontSize:24, fontFamily:mincho }}>{stats.avgVasFirst}</b></div>
+            <span style={{ color:c.brand, fontSize:20 }}>→</span>
+            <div style={{ fontSize:15, color:c.ink }}>最新 平均 <b style={{ fontSize:24, fontFamily:mincho, color:c.brand }}>{stats.avgVasLast}</b></div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── カルテ項目カスタマイズ設定 ────────────────────────────────
+function SettingsView({ fieldKeys, onSave, onBack }) {
+  const [selected, setSelected] = useState(fieldKeys);
+  const [saved, setSaved] = useState(false);
+
+  function toggle(key) {
+    setSaved(false);
+    setSelected((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
+  }
+
+  function handleSave() {
+    // ALL_FIELDSの順序を維持して保存
+    const ordered = ALL_FIELDS.filter((f) => selected.includes(f.key)).map((f) => f.key);
+    onSave(ordered.length ? ordered : DEFAULT_FIELD_KEYS);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
+  }
+
+  return (
+    <div style={{ paddingTop:24 }}>
+      <BackRow onBack={onBack} label="ホームに戻る" />
+      <div style={{ marginTop:16, marginBottom:8 }}>
+        <div style={{ fontFamily:mincho, fontSize:32, fontWeight:700, color:c.ink }}>カルテ項目の設定</div>
+        <div style={{ fontSize:14, color:c.inkSoft, marginTop:6, lineHeight:1.7 }}>
+          院のスタイルに合わせて、カルテに表示する項目を選べます。録音時のガイドと生成カルテに反映されます。
+        </div>
+      </div>
+
+      <div style={{ background:"#fff", borderRadius:20, boxShadow:cardShadow, padding:20, marginTop:16 }}>
+        <div style={{ fontSize:12, color:c.inkFaint, marginBottom:14 }}>チェックした項目がカルテに含まれます（{selected.length}項目選択中）</div>
+        <div style={{ display:"grid", gap:8 }}>
+          {ALL_FIELDS.map((f) => {
+            const on = selected.includes(f.key);
+            return (
+              <button key={f.key} onClick={() => toggle(f.key)} className="hov"
+                style={{ display:"flex", alignItems:"center", gap:12, textAlign:"left", background: on ? c.brandSoft : "#fff", border:`1px solid ${on ? c.brand : c.line}`, borderRadius:12, padding:"12px 14px", cursor:"pointer" }}>
+                <div style={{ width:22, height:22, minWidth:22, borderRadius:6, background: on ? c.brand : "#fff", border:`1px solid ${on ? c.brand : c.line}`, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:13 }}>{on ? "✓" : ""}</div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:14, fontWeight:600, color:c.ink }}>{f.label}</div>
+                  <div style={{ fontSize:12, color:c.inkFaint, marginTop:2 }}>{f.hint}</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{ background:c.brandSoft, borderRadius:14, padding:14, marginTop:14, fontSize:12, color:c.brand, lineHeight:1.7 }}>
+        ℹ️ 痛みスコア（VAS）・SOAP形式・AI離脱リスク検知は、専用機能として常に有効です。カルテ生成時のトグルや患者ページで確認できます。
+      </div>
+
+      <button onClick={handleSave} className="hov" style={{ ...primaryBtn, width:"100%", marginTop:16, padding:15, fontSize:15 }}>
+        {saved ? "✓ 保存しました" : "設定を保存"}
+      </button>
+    </div>
+  );
 }
