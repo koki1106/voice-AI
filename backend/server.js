@@ -158,6 +158,113 @@ async function generateInsights(patientName, visits) {
   return callClaude(system, userMsg, 1500);
 }
 
+// ── カルテ項目設定の取得 ──────────────────────────────────────
+app.get("/api/settings", async (req, res) => {
+  const user = await getUser(req);
+  if (!user) return res.status(401).json({ error: "認証が必要です" });
+
+  const { data, error } = await supabase
+    .from("user_settings")
+    .select("karte_fields")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ karte_fields: data?.karte_fields || null });
+});
+
+// ── カルテ項目設定の保存 ──────────────────────────────────────
+app.put("/api/settings", async (req, res) => {
+  const user = await getUser(req);
+  if (!user) return res.status(401).json({ error: "認証が必要です" });
+
+  const { karte_fields } = req.body;
+  if (!Array.isArray(karte_fields)) return res.status(400).json({ error: "karte_fieldsは配列です" });
+
+  const { error } = await supabase
+    .from("user_settings")
+    .upsert({ user_id: user.id, karte_fields, updated_at: new Date().toISOString() });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ karte_fields });
+});
+
+// ── 統計・傾向分析 ────────────────────────────────────────────
+app.get("/api/stats", async (req, res) => {
+  const user = await getUser(req);
+  if (!user) return res.status(401).json({ error: "認証が必要です" });
+
+  try {
+    const { data: patients } = await supabase
+      .from("patients")
+      .select("id, name, level, visits(id, date, vas, created_at)")
+      .eq("user_id", user.id);
+
+    const list = patients || [];
+    const now = Date.now();
+    const DAY = 1000 * 60 * 60 * 24;
+
+    let totalVisits = 0;
+    let activePatients = 0;      // 30日以内に来院
+    let dropoutPatients = 0;     // レベル推奨間隔の2倍超
+    const levelInterval = { 1: 30, 2: 14, 3: 7 };
+    const monthCounts = {};      // 直近6ヶ月の来院数
+    let vasFirst = [], vasLast = [];
+
+    // 直近6ヶ月のラベル準備
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date();
+      d.setMonth(d.getMonth() - i);
+      monthCounts[`${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}`] = 0;
+    }
+
+    for (const p of list) {
+      const visits = (p.visits || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      totalVisits += visits.length;
+      if (visits.length === 0) continue;
+
+      const lastVisit = visits[visits.length - 1];
+      const daysSince = Math.floor((now - new Date(lastVisit.created_at).getTime()) / DAY);
+      if (daysSince <= 30) activePatients++;
+      const threshold = (levelInterval[p.level || 2]) * 2;
+      if (daysSince >= threshold) dropoutPatients++;
+
+      // 月別カウント
+      for (const v of visits) {
+        const d = new Date(v.created_at);
+        const key = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+        if (key in monthCounts) monthCounts[key]++;
+      }
+
+      // VAS改善（最初と最後）
+      const vasVisits = visits.filter((v) => typeof v.vas === "number");
+      if (vasVisits.length >= 2) {
+        vasFirst.push(vasVisits[0].vas);
+        vasLast.push(vasVisits[vasVisits.length - 1].vas);
+      }
+    }
+
+    const avgVisits = list.length > 0 ? (totalVisits / list.length) : 0;
+    const avgFirst = vasFirst.length ? vasFirst.reduce((a, b) => a + b, 0) / vasFirst.length : null;
+    const avgLast = vasLast.length ? vasLast.reduce((a, b) => a + b, 0) / vasLast.length : null;
+    const avgImprove = (avgFirst && avgFirst > 0) ? Math.round(((avgFirst - avgLast) / avgFirst) * 100) : null;
+
+    res.json({
+      totalPatients: list.length,
+      totalVisits,
+      activePatients,
+      dropoutPatients,
+      avgVisits: Math.round(avgVisits * 10) / 10,
+      monthlyTrend: Object.entries(monthCounts).map(([month, count]) => ({ month, count })),
+      vasImprovement: avgImprove,
+      avgVasFirst: avgFirst !== null ? Math.round(avgFirst * 10) / 10 : null,
+      avgVasLast: avgLast !== null ? Math.round(avgLast * 10) / 10 : null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── 患者一覧取得 ──────────────────────────────────────────────
 app.get("/api/patients", async (req, res) => {
   const user = await getUser(req);
@@ -251,6 +358,44 @@ app.post("/api/visits", async (req, res) => {
   }
 
   res.json({ visit, insights, thanks });
+});
+
+// ── カルテ（来院記録）の編集 ──────────────────────────────────
+app.patch("/api/visits/:id", async (req, res) => {
+  const user = await getUser(req);
+  if (!user) return res.status(401).json({ error: "認証が必要です" });
+
+  const { date, karte, vas } = req.body;
+  const update = {};
+  if (typeof date === "string") update.date = date;
+  if (karte && typeof karte === "object") update.karte = karte;
+  if (vas === null || typeof vas === "number") update.vas = vas;
+
+  const { data, error } = await supabase
+    .from("visits")
+    .update(update)
+    .eq("id", req.params.id)
+    .eq("user_id", user.id)
+    .select()
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ visit: data });
+});
+
+// ── カルテ（来院記録）の削除 ──────────────────────────────────
+app.delete("/api/visits/:id", async (req, res) => {
+  const user = await getUser(req);
+  if (!user) return res.status(401).json({ error: "認証が必要です" });
+
+  const { error } = await supabase
+    .from("visits")
+    .delete()
+    .eq("id", req.params.id)
+    .eq("user_id", user.id);
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ deleted: true });
 });
 
 // ── 患者レベル更新 ────────────────────────────────────────────
