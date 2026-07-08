@@ -575,7 +575,7 @@ function Home({ patients, query, setQuery, onSelect, onNew, addPatient, token })
         </div>
         <div style={{ position:"relative", zIndex:1 }}>
           <div style={{ fontFamily:mincho, fontSize:34, fontWeight:700, lineHeight:1.4, color:"#fff" }}>話すだけで、<br/>カルテになる。</div>
-          <p style={{ color:"rgba(255,255,255,.8)", fontSize:15, marginTop:14, lineHeight:1.8 }}>施術中の会話をそのまま記録。<br/>AIが7項目に整理して、確認・修正するだけ。</p>
+          <p style={{ color:"rgba(255,255,255,.8)", fontSize:15, marginTop:14, lineHeight:1.8 }}>施術中の会話をそのまま記録。<br/>AIが項目に整理して、確認・修正するだけ。</p>
         </div>
       </div>
 
@@ -830,7 +830,7 @@ function Session({ patient, token, onCancel, onSaved, onDone, sections = SECTION
 
           <div style={{ marginTop:10, display:"flex", alignItems:"center", gap:8 }}>
             <span style={{ fontSize:12, color:c.inkFaint }}>カルテ形式：</span>
-            <Toggle active={karteFormat==="standard"} onClick={() => setKarteFormat("standard")}>7項目</Toggle>
+            <Toggle active={karteFormat==="standard"} onClick={() => setKarteFormat("standard")}>項目</Toggle>
             <Toggle active={karteFormat==="soap"} onClick={() => setKarteFormat("soap")}>SOAP</Toggle>
           </div>
 
