@@ -13,6 +13,36 @@ const gothic = "'Noto Sans JP','Hiragino Kaku Gothic ProN','Yu Gothic','Meiryo',
 const cardShadow = "0 2px 12px rgba(0,0,0,0.06)";
 const cardShadowLg = "0 6px 20px rgba(0,0,0,0.08)";
 
+// ── ロゴマーク（音声波形モチーフ）──────────────────────────────
+// variant: "brand"（緑背景・白波形） / "light"（白背景・緑波形） / "onDark"（透明背景・白波形）
+function LogoMark({ size = 44, variant = "brand", radius }) {
+  const r = radius ?? Math.round(size * 0.27);
+  const bg = variant === "brand" ? c.brand : variant === "light" ? "#fff" : "transparent";
+  const stroke = variant === "light" ? c.brand : "#fff";
+  const accent = c.accent;
+  // 波形バーの高さ（中央対称）
+  const bars = [0.32, 0.6, 1.0, 0.72, 0.44];
+  const barW = size * 0.07;
+  const gap = size * 0.075;
+  const totalW = bars.length * barW + (bars.length - 1) * gap;
+  const startX = (size - totalW) / 2;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ display:"block" }}>
+      {bg !== "transparent" && <rect x="0" y="0" width={size} height={size} rx={r} fill={bg} />}
+      {bars.map((h, i) => {
+        const bh = size * 0.5 * h;
+        const x = startX + i * (barW + gap);
+        const y = (size - bh) / 2;
+        const isCenter = i === 2;
+        return (
+          <rect key={i} x={x} y={y} width={barW} height={bh} rx={barW / 2}
+            fill={isCenter ? accent : stroke} opacity={isCenter ? 1 : 0.9} />
+        );
+      })}
+    </svg>
+  );
+}
+
 // カルテ項目マスター（全候補）。defaultOn=true が初期表示項目
 const ALL_FIELDS = [
   { key: "patient",         num: "①", q: "誰？",          label: "患者情報",   hint: "患者名・来院回数", defaultOn: true },
@@ -142,9 +172,8 @@ export default function App() {
         @keyframes pulse { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.12);opacity:.55} }
         @keyframes ring { 0%{box-shadow:0 0 0 0 rgba(216,80,61,.45)} 100%{box-shadow:0 0 0 22px rgba(216,80,61,0)} }
         @keyframes wave { 0%,100%{transform:scaleY(.35)} 50%{transform:scaleY(1)} }
-        @keyframes splashLogoIn { 0%{opacity:0;transform:translateY(8px)} 100%{opacity:1;transform:none} }
-        @keyframes lineFlow { 0%{transform:translateX(-100%)} 100%{transform:translateX(100%)} }
-        @keyframes floatParticle { 0%{opacity:0;transform:translate(0,0)} 30%{opacity:.9} 100%{opacity:0} }
+        @keyframes splashRing { 0%{opacity:0;transform:scale(.85)} 40%{opacity:1} 100%{opacity:0;transform:scale(1.25)} }
+        @keyframes splashSweep { 0%{transform:translateX(-120%)} 100%{transform:translateX(320%)} }
         .rise { animation: rise .5s cubic-bezier(.2,.7,.3,1) both; }
         .fade-in { animation: fadeIn .6s ease both; }
         .hov { transition: transform .15s ease, filter .15s ease; }
@@ -166,75 +195,46 @@ export default function App() {
   );
 }
 
-// ── スプラッシュアニメーション（ログイン後のブランド演出）──────
+// ── スプラッシュアニメーション（静かで高級感のあるブランド演出）──
 function SplashScreen({ onDone }) {
   const [phase, setPhase] = useState(0);
+  const [leaving, setLeaving] = useState(false);
   useEffect(() => {
     const timers = [
-      setTimeout(() => setPhase(1), 500),   // 波形
-      setTimeout(() => setPhase(2), 1200),  // 解析
-      setTimeout(() => setPhase(3), 1900),  // 完了ライン
-      setTimeout(() => onDone(), 2800),     // フェードアウト
+      setTimeout(() => setPhase(1), 200),   // ロゴ静かに出現
+      setTimeout(() => setPhase(2), 1100),  // テキスト出現
+      setTimeout(() => setLeaving(true), 2400), // フェードアウト開始
+      setTimeout(() => onDone(), 3000),
     ];
     return () => timers.forEach(clearTimeout);
   }, [onDone]);
-
-  const particles = Array.from({ length: 18 });
 
   return (
     <div style={{
       position:"fixed", inset:0, zIndex:100, display:"flex", flexDirection:"column",
       alignItems:"center", justifyContent:"center",
-      background:"radial-gradient(circle at 50% 40%, #0F4B3E 0%, #072019 100%)",
-      animation: phase >= 3 ? "fadeIn .5s ease reverse forwards" : "none",
+      background:"linear-gradient(160deg, #0F4B3E 0%, #0A3B31 55%, #072019 100%)",
+      opacity: leaving ? 0 : 1, transition:"opacity .6s ease",
     }}>
-      {/* 光の粒子 */}
-      {phase >= 1 && particles.map((_, i) => {
-        const angle = (i / particles.length) * Math.PI * 2;
-        const dist = 60 + (i % 5) * 22;
-        return (
-          <span key={i} style={{
-            position:"absolute", width:4, height:4, borderRadius:"50%",
-            background: i % 2 ? "#C9E8DC" : "#FFFFFF",
-            left:"50%", top:"44%",
-            transform:`translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist}px)`,
-            animation:`floatParticle ${1.2 + (i%4)*0.3}s ease-in-out ${(i%6)*0.1}s infinite`,
-          }} />
-        );
-      })}
-
-      {/* ロゴ + 波形 */}
-      <div style={{ display:"flex", alignItems:"center", gap:16, animation:"splashLogoIn .6s ease both", zIndex:2 }}>
-        {phase >= 1 && <Waveform side="left" active={phase === 1} />}
-        <div style={{ textAlign:"center" }}>
-          <div style={{ width:64, height:64, borderRadius:16, background:"rgba(255,255,255,.12)", border:"1px solid rgba(255,255,255,.25)", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:32, margin:"0 auto 14px" }}>◔</div>
-          <div style={{ fontFamily:mincho, fontSize:28, color:"#fff", letterSpacing:2 }}>音声カルテ</div>
-          <div style={{ fontSize:11, letterSpacing:3, color:"rgba(255,255,255,.6)", marginTop:4 }}>VOICE AI KARTE</div>
+      {/* 中央ロゴ（静かにフェード＋わずかに上昇） */}
+      <div style={{ opacity: phase >= 1 ? 1 : 0, transform: phase >= 1 ? "translateY(0)" : "translateY(12px)", transition:"opacity .9s ease, transform .9s cubic-bezier(.2,.7,.3,1)", textAlign:"center" }}>
+        <div style={{ width:88, height:88, margin:"0 auto", position:"relative" }}>
+          <LogoMark size={88} variant="onDark" radius={22} />
+          {/* ロゴを囲む細いリング（静かに広がる） */}
+          <div style={{ position:"absolute", inset:-10, borderRadius:26, border:"1px solid rgba(255,255,255,.18)", animation: phase >= 1 ? "splashRing 2.2s ease-out forwards" : "none" }} />
         </div>
-        {phase >= 1 && <Waveform side="right" active={phase === 1} />}
       </div>
 
-      {/* 完了ライン */}
-      {phase >= 3 && (
-        <div style={{ position:"absolute", bottom:"32%", width:160, height:2, background:"rgba(255,255,255,.15)", overflow:"hidden", borderRadius:2 }}>
-          <div style={{ width:"50%", height:"100%", background:"#fff", animation:"lineFlow 1s ease-in-out infinite" }} />
-        </div>
-      )}
-    </div>
-  );
-}
+      {/* サービス名（少し遅れて出現） */}
+      <div style={{ marginTop:26, textAlign:"center", opacity: phase >= 2 ? 1 : 0, transform: phase >= 2 ? "translateY(0)" : "translateY(8px)", transition:"opacity .8s ease, transform .8s ease" }}>
+        <div style={{ fontFamily:mincho, fontSize:26, fontWeight:600, color:"#fff", letterSpacing:4 }}>音声カルテ</div>
+        <div style={{ fontSize:10, letterSpacing:4, color:"rgba(255,255,255,.5)", marginTop:8 }}>VOICE&nbsp;&nbsp;AI&nbsp;&nbsp;KARTE</div>
+      </div>
 
-function Waveform({ side, active }) {
-  const bars = [0,1,2,3,4];
-  return (
-    <div style={{ display:"flex", alignItems:"center", gap:3, height:44, flexDirection: side === "left" ? "row" : "row-reverse" }}>
-      {bars.map((b) => (
-        <span key={b} style={{
-          width:3, height:36, borderRadius:2, background:"rgba(255,255,255,.5)",
-          transformOrigin:"center",
-          animation:`wave ${0.9 + b*0.12}s ease-in-out ${b*0.08}s infinite`,
-        }} />
-      ))}
+      {/* 下部の細い光のスイープ（1回だけ） */}
+      <div style={{ position:"absolute", bottom:"30%", width:120, height:1, background:"rgba(255,255,255,.1)", overflow:"hidden", opacity: phase >= 2 ? 1 : 0, transition:"opacity .6s ease" }}>
+        <div style={{ position:"absolute", inset:0, width:"40%", background:"linear-gradient(90deg, transparent, rgba(200,180,120,.9), transparent)", animation: phase >= 2 ? "splashSweep 1.6s ease-in-out infinite" : "none" }} />
+      </div>
     </div>
   );
 }
@@ -244,11 +244,17 @@ function AuthScreen() {
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const pwValid = password.length >= 6;
+  const canSubmit = emailValid && pwValid && !loading;
+
   async function handleSubmit() {
+    if (!canSubmit) return;
     setError(""); setMessage(""); setLoading(true);
     try {
       if (mode === "login") {
@@ -260,6 +266,27 @@ function AuthScreen() {
         setMessage("確認メールを送信しました。メールのリンクをクリックしてください。");
       }
     } catch (e) {
+      // よくあるエラーを日本語化
+      const msg = e.message || "";
+      if (/Invalid login credentials/i.test(msg)) setError("メールアドレスまたはパスワードが正しくありません。");
+      else if (/already registered/i.test(msg)) setError("このメールアドレスは既に登録されています。");
+      else if (/rate limit/i.test(msg)) setError("試行回数が多すぎます。しばらく待ってから再度お試しください。");
+      else setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleReset() {
+    if (!emailValid) { setError("パスワードをリセットするには、先にメールアドレスを入力してください。"); return; }
+    setError(""); setMessage(""); setLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin,
+      });
+      if (error) throw error;
+      setMessage("パスワード再設定用のメールを送信しました。メールをご確認ください。");
+    } catch (e) {
       setError(e.message);
     } finally {
       setLoading(false);
@@ -267,39 +294,75 @@ function AuthScreen() {
   }
 
   return (
-    <div style={{ display:"flex", alignItems:"center", justifyContent:"center", minHeight:"100vh", padding:20 }}>
-      <div style={{ width:"100%", maxWidth:380 }} className="rise">
-        <div style={{ textAlign:"center", marginBottom:32 }}>
-          <div style={{ width:44, height:44, borderRadius:12, background:c.brand, display:"inline-flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:22, marginBottom:12 }}>◔</div>
-          <div style={{ fontFamily:mincho, fontSize:24, color:c.ink }}>音声カルテ</div>
-          <div style={{ fontSize:11, letterSpacing:2, color:c.inkFaint, marginTop:2 }}>VOICE AI KARTE</div>
+    <div style={{ minHeight:"100vh", display:"flex", flexDirection:"column", background:"linear-gradient(165deg, #0F4B3E 0%, #0A3B31 100%)" }}>
+      {/* 上部ブランドエリア */}
+      <div style={{ paddingTop:"clamp(48px, 12vh, 110px)", paddingBottom:40, textAlign:"center" }} className="fade-in">
+        <div style={{ width:76, height:76, margin:"0 auto 18px" }}>
+          <LogoMark size={76} variant="onDark" radius={20} />
         </div>
+        <div style={{ fontFamily:mincho, fontSize:30, fontWeight:600, color:"#fff", letterSpacing:3 }}>音声カルテ</div>
+        <div style={{ fontSize:11, letterSpacing:4, color:"rgba(255,255,255,.55)", marginTop:8 }}>VOICE&nbsp;&nbsp;AI&nbsp;&nbsp;KARTE</div>
+      </div>
 
-        <div style={{ background:c.surface, border:`1px solid ${c.line}`, borderRadius:16, padding:28 }}>
-          <div style={{ display:"flex", marginBottom:20, borderBottom:`1px solid ${c.line}`, paddingBottom:0 }}>
+      {/* 白カードエリア */}
+      <div style={{ flex:1, background:c.paper, borderRadius:"28px 28px 0 0", padding:"32px 24px 40px", boxShadow:"0 -8px 30px rgba(0,0,0,.15)" }}>
+        <div style={{ width:"100%", maxWidth:400, margin:"0 auto" }} className="rise">
+          {/* タブ */}
+          <div style={{ display:"flex", background:"#F2EFE9", borderRadius:14, padding:4, marginBottom:24 }}>
             {["login","signup"].map((m) => (
               <button key={m} onClick={() => { setMode(m); setError(""); setMessage(""); }}
-                style={{ flex:1, padding:"10px 0", background:"none", border:"none", borderBottom:`2px solid ${mode===m ? c.brand : "transparent"}`, cursor:"pointer", fontSize:14, fontWeight:mode===m ? 600 : 400, color:mode===m ? c.brand : c.inkFaint, marginBottom:-1 }}>
+                style={{ flex:1, padding:"11px 0", background: mode===m ? c.accent : "transparent", border:"none", borderRadius:11, cursor:"pointer", fontSize:14, fontWeight:600, color: mode===m ? "#fff" : c.inkSoft, transition:"all .2s ease", boxShadow: mode===m ? "0 2px 8px rgba(184,134,59,.35)" : "none" }}>
                 {m === "login" ? "ログイン" : "新規登録"}
               </button>
             ))}
           </div>
 
-          <div style={{ display:"grid", gap:12 }}>
+          {/* メール */}
+          <div style={{ marginBottom:16 }}>
+            <label style={{ fontSize:12, fontWeight:600, color:c.inkSoft, display:"block", marginBottom:6 }}>メールアドレス</label>
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-              placeholder="メールアドレス" style={inputS} />
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-              placeholder="パスワード（6文字以上）" style={inputS}
-              onKeyDown={(e) => e.key === "Enter" && handleSubmit()} />
+              placeholder="you@example.com"
+              style={{ width:"100%", height:52, padding:"0 16px", border:`1px solid ${email && !emailValid ? "#E0A9A2" : c.line}`, borderRadius:14, fontSize:15, background:"#fff", color:c.ink }} />
+            {email && !emailValid && <div style={{ fontSize:12, color:c.rec, marginTop:5 }}>正しいメールアドレスを入力してください。</div>}
           </div>
 
-          {error && <div style={{ color:c.rec, fontSize:13, marginTop:12 }}>{error}</div>}
-          {message && <div style={{ color:c.brand, fontSize:13, marginTop:12 }}>{message}</div>}
+          {/* パスワード（表示切替つき） */}
+          <div style={{ marginBottom:8 }}>
+            <label style={{ fontSize:12, fontWeight:600, color:c.inkSoft, display:"block", marginBottom:6 }}>パスワード</label>
+            <div style={{ position:"relative", display:"flex", alignItems:"center" }}>
+              <input type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)}
+                placeholder="6文字以上"
+                onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+                style={{ width:"100%", height:52, padding:"0 48px 0 16px", border:`1px solid ${password && !pwValid ? "#E0A9A2" : c.line}`, borderRadius:14, fontSize:15, background:"#fff", color:c.ink }} />
+              <button onClick={() => setShowPw((v) => !v)} type="button"
+                style={{ position:"absolute", right:8, height:38, width:38, display:"flex", alignItems:"center", justifyContent:"center", background:"none", border:"none", cursor:"pointer", color:c.inkFaint, fontSize:16 }}>
+                {showPw ? "🙈" : "👁"}
+              </button>
+            </div>
+            {password && !pwValid && <div style={{ fontSize:12, color:c.rec, marginTop:5 }}>パスワードは6文字以上で入力してください。</div>}
+          </div>
 
-          <button onClick={handleSubmit} disabled={loading} className="hov"
-            style={{ ...primaryBtn, width:"100%", marginTop:16, padding:14, fontSize:15, opacity:loading ? 0.7 : 1 }}>
+          {/* パスワードを忘れた方 */}
+          {mode === "login" && (
+            <div style={{ textAlign:"right", marginBottom:16 }}>
+              <button onClick={handleReset} type="button" style={{ background:"none", border:"none", cursor:"pointer", color:c.brand, fontSize:12, fontWeight:600, padding:0 }}>
+                パスワードを忘れた方はこちら
+              </button>
+            </div>
+          )}
+
+          {error && <div style={{ background:"#FCEBEB", color:"#A32D2D", fontSize:13, padding:"10px 12px", borderRadius:10, marginBottom:14, lineHeight:1.6 }}>{error}</div>}
+          {message && <div style={{ background:c.brandSoft, color:c.brand, fontSize:13, padding:"10px 12px", borderRadius:10, marginBottom:14, lineHeight:1.6 }}>{message}</div>}
+
+          {/* 送信ボタン（ゴールド・状態制御つき） */}
+          <button onClick={handleSubmit} disabled={!canSubmit} className="hov"
+            style={{ width:"100%", height:54, border:"none", borderRadius:16, background: canSubmit ? `linear-gradient(135deg, ${c.accent}, ${c.accentDeep})` : "#D8D3C8", color:"#fff", cursor: canSubmit ? "pointer" : "not-allowed", fontSize:15, fontWeight:700, letterSpacing:1, boxShadow: canSubmit ? "0 4px 14px rgba(184,134,59,.35)" : "none", transition:"all .2s ease" }}>
             {loading ? "処理中…" : mode === "login" ? "ログイン" : "アカウントを作成"}
           </button>
+
+          <div style={{ textAlign:"center", marginTop:20, fontSize:11, color:c.inkFaint, lineHeight:1.7 }}>
+            医療AIによる施術記録支援サービス
+          </div>
         </div>
       </div>
     </div>
@@ -431,7 +494,7 @@ function Header({ onHome, onStats, onSettings, onChat, onLogout, email }) {
     <div style={{ borderBottom:`1px solid ${c.line}`, background:"#fff", position:"sticky", top:0, zIndex:20 }}>
       <div style={{ maxWidth:860, margin:"0 auto", height:72, padding:"0 20px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
         <button onClick={onHome} style={{ background:"none", border:"none", cursor:"pointer", padding:0, display:"flex", alignItems:"center", gap:12, minWidth:0 }}>
-          <div style={{ width:44, height:44, minWidth:44, borderRadius:12, background:c.brand, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:22 }}>◔</div>
+          <LogoMark size={44} variant="brand" />
           <div style={{ textAlign:"left", minWidth:0 }}>
             <div style={{ fontFamily:mincho, fontSize:22, fontWeight:700, letterSpacing:1, color:c.ink, whiteSpace:"nowrap", lineHeight:1.2 }}>音声カルテ</div>
             <div style={{ fontSize:10, letterSpacing:1.5, color:c.inkFaint, whiteSpace:"nowrap", lineHeight:1.2 }}>VOICE&nbsp;AI&nbsp;KARTE</div>
@@ -440,21 +503,21 @@ function Header({ onHome, onStats, onSettings, onChat, onLogout, email }) {
 
         {/* デスクトップ：横並び */}
         <div className="hdr-desktop" style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <button onClick={onStats} className="hov" style={headerBtn}>◫ 統計</button>
+          <button onClick={onStats} className="hov" style={headerBtn}>📊 統計</button>
           <button onClick={onSettings} className="hov" style={headerBtn}>⚙ 設定</button>
-          <button onClick={onChat} className="hov" style={headerBtn}>◇ AI相談</button>
-          <button onClick={onLogout} className="hov" style={headerBtn}>⏻ ログアウト</button>
+          <button onClick={onChat} className="hov" style={headerBtn}>💬 AI相談</button>
+          <button onClick={onLogout} className="hov" style={headerBtn}>⎋ ログアウト</button>
         </div>
 
         {/* モバイル：ハンバーガー */}
         <div className="hdr-mobile" style={{ position:"relative" }}>
           <button onClick={() => setMenuOpen((v) => !v)} className="hov" style={{ ...headerBtn, padding:"0 12px" }}>☰</button>
           {menuOpen && (
-            <div style={{ position:"absolute", right:0, top:52, background:"#fff", border:`1px solid ${c.line}`, borderRadius:14, boxShadow:cardShadowLg, padding:6, minWidth:160, zIndex:30 }}>
-              {[["◫ 統計", onStats], ["⚙ 設定", onSettings], ["◇ AI相談", onChat], ["⏻ ログアウト", onLogout]].map(([label, fn]) => (
+            <div style={{ position:"absolute", right:0, top:52, background:"#fff", border:`1px solid ${c.line}`, borderRadius:14, boxShadow:cardShadowLg, padding:6, minWidth:170, zIndex:30 }}>
+              {[["📊", "統計", onStats], ["⚙", "設定", onSettings], ["💬", "AI相談", onChat], ["⎋", "ログアウト", onLogout]].map(([icon, label, fn]) => (
                 <button key={label} onClick={() => { setMenuOpen(false); fn(); }} className="hov"
-                  style={{ display:"block", width:"100%", textAlign:"left", background:"none", border:"none", padding:"11px 12px", borderRadius:10, cursor:"pointer", fontSize:14, color:c.ink, fontWeight:500 }}>
-                  {label}
+                  style={{ display:"flex", alignItems:"center", gap:10, width:"100%", textAlign:"left", background:"none", border:"none", padding:"11px 12px", borderRadius:10, cursor:"pointer", fontSize:14, color:c.ink, fontWeight:500 }}>
+                  <span style={{ width:22, textAlign:"center" }}>{icon}</span> {label}
                 </button>
               ))}
             </div>
@@ -504,11 +567,16 @@ function Home({ patients, query, setQuery, onSelect, onNew, addPatient, token })
   const displayed = query ? filtered : sortedByRecent.slice(0, 5);
 
   return (
-    <div style={{ paddingTop:32 }}>
-      {/* メインコピー */}
-      <div className="rise">
-        <div style={{ fontFamily:mincho, fontSize:40, fontWeight:700, lineHeight:1.35, color:c.ink }}>話すだけで、<br/>カルテになる。</div>
-        <p style={{ color:c.inkSoft, fontSize:16, marginTop:16, lineHeight:1.8 }}>施術中の会話をそのまま記録。<br/>AIが7項目に整理して、確認・修正するだけ。</p>
+    <div style={{ paddingTop:24 }}>
+      {/* メインビジュアルカード（深緑背景） */}
+      <div className="rise" style={{ position:"relative", background:`linear-gradient(140deg, ${c.brand} 0%, ${c.brandDeep} 100%)`, borderRadius:24, padding:"32px 28px", overflow:"hidden", boxShadow:cardShadowLg }}>
+        <div style={{ position:"absolute", right:-10, top:"50%", transform:"translateY(-50%)", opacity:0.12 }}>
+          <LogoMark size={150} variant="onDark" radius={30} />
+        </div>
+        <div style={{ position:"relative", zIndex:1 }}>
+          <div style={{ fontFamily:mincho, fontSize:34, fontWeight:700, lineHeight:1.4, color:"#fff" }}>話すだけで、<br/>カルテになる。</div>
+          <p style={{ color:"rgba(255,255,255,.8)", fontSize:15, marginTop:14, lineHeight:1.8 }}>施術中の会話をそのまま記録。<br/>AIが7項目に整理して、確認・修正するだけ。</p>
+        </div>
       </div>
 
       {dropoutPatients.length > 0 && (
@@ -516,14 +584,14 @@ function Home({ patients, query, setQuery, onSelect, onNew, addPatient, token })
       )}
 
       {/* 検索エリア */}
-      <div style={{ marginTop:32, display:"flex", gap:12 }}>
-        <div style={{ flex:"1 1 70%", position:"relative", display:"flex", alignItems:"center" }}>
+      <div style={{ marginTop:24, display:"flex", gap:12 }}>
+        <div style={{ flex:"1 1 68%", position:"relative", display:"flex", alignItems:"center", background:"#fff", borderRadius:16, boxShadow:cardShadow }}>
           <span style={{ position:"absolute", left:16, fontSize:16, color:c.inkFaint }}>⌕</span>
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="患者名・よみがなで検索"
-            style={{ width:"100%", height:56, padding:"0 16px 0 42px", border:`1px solid ${c.line}`, borderRadius:16, fontSize:15, background:"#fff", color:c.ink }} />
+            style={{ width:"100%", height:56, padding:"0 16px 0 42px", border:"none", borderRadius:16, fontSize:15, background:"transparent", color:c.ink }} />
         </div>
         <button onClick={() => setShowNew((v) => !v)} className="hov"
-          style={{ flex:"1 1 30%", height:56, display:"flex", alignItems:"center", justifyContent:"center", gap:6, background:c.brand, color:"#fff", border:"none", borderRadius:16, cursor:"pointer", fontSize:15, fontWeight:600 }}>
+          style={{ flex:"1 1 32%", height:56, display:"flex", alignItems:"center", justifyContent:"center", gap:6, background:`linear-gradient(135deg, ${c.accent}, ${c.accentDeep})`, color:"#fff", border:"none", borderRadius:16, cursor:"pointer", fontSize:15, fontWeight:700, boxShadow:"0 4px 14px rgba(184,134,59,.3)" }}>
           ＋ 新規患者
         </button>
       </div>
@@ -575,20 +643,31 @@ function PatientCard({ patient, onSelect, onNew }) {
   const visits = patient.visits || [];
   const last = visits[0];
   const initial = (patient.name || "?").trim().charAt(0);
+  const levelInfo = LEVELS[patient.level || 2];
+  const lastKarte = last?.karte || {};
+  const symptom = lastKarte.chief_complaint || lastKarte.subjective || "";
+  // 症状を短いタグに（最初の読点/句点/スペースまで、最大12文字）
+  const symptomTag = symptom ? symptom.split(/[、。・\s]/)[0].slice(0, 12) : "";
+  const daysSince = daysSinceLastVisit(patient);
+  const isFollow = daysSince !== null && daysSince >= levelInfo.interval * 2;
+
   return (
-    <div className="card-hov" style={{ background:"#fff", borderRadius:18, boxShadow:cardShadow, padding:20, display:"flex", alignItems:"center", gap:16 }}>
+    <div className="card-hov" style={{ position:"relative", background:"#fff", borderRadius:18, boxShadow:cardShadow, padding:"20px 20px 20px 24px", display:"flex", alignItems:"center", gap:16, overflow:"hidden" }}>
+      {/* 左アクセントライン（レベル色） */}
+      <div style={{ position:"absolute", left:0, top:0, bottom:0, width:5, background:levelInfo.color }} />
       <div style={{ width:52, height:52, minWidth:52, borderRadius:"50%", background:c.brandSoft, color:c.brand, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, fontWeight:700, fontFamily:mincho }}>{initial}</div>
-      <button onClick={() => onSelect(patient)} style={{ background:"none", border:"none", cursor:"pointer", textAlign:"left", flex:1, padding:0 }}>
-        <div style={{ fontSize:18, fontWeight:700, color:c.ink }}>{patient.name}</div>
-        <div style={{ fontSize:13, color:c.inkSoft, marginTop:4 }}>
-          {patient.kana || "—"} ・ 来院 {visits.length} 回
+      <button onClick={() => onSelect(patient)} style={{ background:"none", border:"none", cursor:"pointer", textAlign:"left", flex:1, padding:0, minWidth:0 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+          <span style={{ fontSize:18, fontWeight:700, color:c.ink }}>{patient.name}</span>
+          {symptomTag && <span style={{ fontSize:11, fontWeight:600, padding:"2px 8px", borderRadius:6, background:c.brandSoft, color:c.brand }}>{symptomTag}</span>}
+          {isFollow && <span style={{ fontSize:11, fontWeight:600, padding:"2px 8px", borderRadius:6, background:"#FCEBEB", color:"#A32D2D" }}>要フォロー</span>}
         </div>
-        <div style={{ fontSize:13, color:c.inkSoft, marginTop:2 }}>
-          {last ? `最終来院 ${last.date}` : "未来院"}
+        <div style={{ fontSize:13, color:c.inkSoft, marginTop:5 }}>
+          {patient.kana || "—"} ・ 来院 {visits.length} 回 ・ {last ? `最終 ${last.date}` : "未来院"}
         </div>
       </button>
       <button onClick={() => onNew(patient)} className="hov"
-        style={{ height:42, width:140, minWidth:140, display:"flex", alignItems:"center", justifyContent:"center", gap:4, background:"#fff", border:`1px solid ${c.line}`, borderRadius:12, color:c.brand, cursor:"pointer", fontSize:13, fontWeight:600 }}>
+        style={{ height:42, width:130, minWidth:130, display:"flex", alignItems:"center", justifyContent:"center", gap:4, background:"#fff", border:`1px solid ${c.line}`, borderRadius:12, color:c.brand, cursor:"pointer", fontSize:13, fontWeight:600 }}>
         施術を記録 ›
       </button>
     </div>
@@ -882,8 +961,8 @@ function PatientDetail({ patient, token, onBack, onNew, onLevelUpdated, onUpdate
           <div style={{ fontSize:16, color:c.inkSoft, marginTop:6 }}>{patient.kana || "—"} ・ 来院 {visits.length} 回</div>
         </div>
         <button onClick={onNew} className="hov"
-          style={{ height:56, padding:"0 22px", background:c.brand, color:"#fff", border:"none", borderRadius:16, cursor:"pointer", fontSize:15, fontWeight:600, boxShadow:cardShadow }}>
-          ＋ 今日の施術を記録
+          style={{ height:56, padding:"0 22px", background:c.brand, color:"#fff", border:`2px solid ${c.accent}`, borderRadius:16, cursor:"pointer", fontSize:15, fontWeight:700, boxShadow:"0 4px 14px rgba(15,75,62,.25)", display:"flex", alignItems:"center", gap:8 }}>
+          <span style={{ color:c.accent, fontSize:18 }}>●</span> 今日の施術を記録
         </button>
       </div>
 
