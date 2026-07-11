@@ -1079,7 +1079,7 @@ function TodayQuestionsCard({ insights }) {
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
           <div style={{ width:40, height:40, borderRadius:12, background:c.accent, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:18 }}>❝</div>
-          <div style={{ fontFamily:mincho, fontSize:20, fontWeight:600, color:c.accentDeep }}>今日聞くこと</div>
+          <div style={{ fontFamily:mincho, fontSize:20, fontWeight:600, color:c.accentDeep }}>前回の施術</div>
         </div>
         <span style={{ fontSize:13, color:c.inkFaint }}>次回来院の確認ポイント</span>
       </div>
